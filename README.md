@@ -9,21 +9,21 @@ Torcedores precisam saber quando e onde assistir aos jogos dos times da Série A
 
 Coletar, normalizar e disponibilizar consultas sobre:
 
-Time mandante/visitante
+- Time mandante/visitante
 
-Adversário
+- Adversário
 
-Data e horário (com fuso correto)
+- Data e horário (com fuso correto)
 
-Onde assistir (TV aberta/fechada, streaming, YouTube) e link quando aplicável
+- Onde assistir (TV aberta/fechada, streaming, YouTube) e link quando aplicável
 
 Consultas-alvo (exemplos):
 
-“Próximo jogo do Cruzeiro e onde assistir”
+- “Próximo jogo do Cruzeiro e onde assistir”
 
-“Jogos do Flamengo nesta semana em streaming”
+- “Jogos do Flamengo nesta semana em streaming”
 
-“Transmissões no YouTube no mês que vem”
+- “Transmissões no YouTube no mês que vem”
 
 3) Escopo e Fontes
 
@@ -45,31 +45,31 @@ Nota de escala (50k+ páginas): além das páginas de partidas, o sistema coleta
 
 Crawler vertical (Focused Crawler) com adaptadores por fonte.
 
-Extrator: parser de HTML/JSON-LD/Schema.org + heurísticas para datas/horários e blocos “onde assistir”.
+- Extrator: parser de HTML/JSON-LD/Schema.org + heurísticas para datas/horários e blocos “onde assistir”.
 
-Normalizador:
+- Normalizador:
 
-times ⇢ dicionário controlado (ID, nomes alternativos: “Atlético-MG”, “Atlético Mineiro”, “CAM”)
+  - times ⇢ dicionário controlado (ID, nomes alternativos: “Atlético-MG”, “Atlético Mineiro”, “CAM”)
 
-datas ⇢ UTC + America/Sao_Paulo
+  - datas ⇢ UTC + America/Sao_Paulo
 
-transmissões ⇢ enum {tv_aberta, tv_fechada, streaming, youtube} + provider_name + url
+  - transmissões ⇢ enum {tv_aberta, tv_fechada, streaming, youtube} + provider_name + url
 
-Deduplicação por (teamA, teamB, datetime, competição) com tolerância de 15 min.
+  - Deduplicação por (teamA, teamB, datetime, competição) com tolerância de 15 min.
 
-Armazenamento:
+- Armazenamento:
 
-Banco relacional (PostgreSQL) para consistência dos jogos.
+  - Banco relacional (PostgreSQL) para consistência dos jogos. Ou salvamento em CSV file -> TODO
 
-Índice full-text (OpenSearch/Elasticsearch) para consultas livres (“onde assistir Flamengo domingo”).
+  - Índice full-text (OpenSearch/Elasticsearch) para consultas livres (“onde assistir Flamengo domingo”). TODO
 
-API de consulta:
+- API de consulta:
 
-/matches?team=FLA&from=2025-09-19&to=2025-10-19&channel=streaming
+  - /matches?team=FLA&from=2025-09-19&to=2025-10-19&channel=streaming
 
-/next?team=CAM
+  - /next?team=CAM
 
-Observabilidade: logs por página, métricas (páginas/h, taxa de erro, tempo por requisição).
+- Observabilidade: logs por página, métricas (páginas/h, taxa de erro, tempo por requisição).
 
 5) Modelo de Dados (resumo)
 
@@ -107,38 +107,38 @@ Coletar apenas informação pública; não burlar paywalls; sem login.
 
 Citar fonte no dado normalizado (campo source + source_url); manter evidência (hash do HTML).
 
-Descrição do Coletor
+## Descrição do Coletor
 1) Tipo do Coletor
 
-Crawler vertical e focado (focused crawler) com:
+- Crawler vertical e focado (focused crawler) com:
 
-Frontier orientada por prioridade (páginas de “agenda/rodada/onde assistir” > notícias > históricos).
+- Frontier orientada por prioridade (páginas de “agenda/rodada/onde assistir” > notícias > históricos).
 
-Política de re-visita (scheduler) baseada no horizonte de jogos (7, 15 e 30 dias) e na dinâmica da fonte:
+- Política de re-visita (scheduler) baseada no horizonte de jogos (7, 15 e 30 dias) e na dinâmica da fonte:
 
-Fontes “rápidas” (portais/TV) revisitadas a cada 2–6h perto da rodada; clubes 6–24h.
+- Fontes “rápidas” (portais/TV) revisitadas a cada 2–6h perto da rodada; clubes 6–24h.
 
 2) Propriedades Técnicas
 
-Descoberta de URLs:
+- Descoberta de URLs:
 
 seeds estáticas por fonte (ex.: /agenda, /tabela, /calendario, /onde-assistir, sitemaps).
 
 follow controlado: mesmo domínio e padrões whitelisted (regex).
 
-Paralelismo e Politeness:
+- Paralelismo e Politeness:
 
 N workers com limite por domínio (ex.: 1–2 req/s) + exponencial backoff.
 
 Respeito a Crawl-delay quando indicado; User-Agent identificável do projeto.
 
-Tolerâncias (timeouts & retries):
+- Tolerâncias (timeouts & retries):
 
 connect_timeout: 5–8s, read_timeout: 10–15s
 
 retry: 2 com backoff (apenas para 5xx/timeout), sem retry para 4xx exceto 429 (aguarda).
 
-Critérios de Parada:
+- Critérios de Parada:
 
 Escala: coletar ≥ 50.000 páginas (somatório documents), mantendo proporção de fontes.
 
@@ -146,13 +146,13 @@ Profundidade: max_depth por seed (ex.: 2 para “agenda”, 1 para “onde assis
 
 Orçamento: max_pages_per_domain (ex.: 5k) e janela de tempo da coleta (ex.: 48–72h para a etapa).
 
-Políticas de Frontier:
+- Políticas de Frontier:
 
 PriorityQueue com score = tipo_página (agenda > onde-assistir > tabela > notícia > outros)
 
 recência (mais recente primeiro) + previsão de utilidade (contém nomes de clubes/rodada).
 
-Normalização & Enriquecimento:
+- Normalização & Enriquecimento:
 
 Resolver nomes de times via dicionário/aliases e, se necessário, fuzzy match (Levenshtein).
 
@@ -160,19 +160,19 @@ Timezone: parse em PT-BR, converte para America/Sao_Paulo e mantém cópia em UT
 
 Transmissão: mapeia keywords (“transmit”, “onde assistir”, “Premiere”, “YouTube”, “Amazon”, “Max”, “Globoplay”, etc.) e captura href quando disponível.
 
-Deduplicação:
+- Deduplicação:
 
 hash do corpo para documentos;
 
 para partidas, chave canônica (home, away, start_time_utc ±15m, competição) com priorização de fonte oficial; conflitos viram alertas.
 
-Extração Estruturada:
+- Extração Estruturada:
 
 Preferência por schema.org (SportsEvent, Event, BroadcastEvent) quando presente.
 
 Em HTML “livre”: seletores específicos por adaptador (ex.: .match-card .teams, .date-time, .where-to-watch a).
 
-Observabilidade:
+- Observabilidade:
 
 Log por fetch (URL, status, ms); por extração (campos faltantes, regra acionada).
 
@@ -194,7 +194,7 @@ Rate limit por domínio e respeito a robots: evita bloqueios e cumpre boas prát
 
 4) Critério de Escala (≥ 50 mil páginas)
 
-Plano para atingir a meta dentro do escopo:
+- Plano para atingir a meta dentro do escopo:
 
 20 clubes × (páginas de agenda/calendário + notícias + match reports + arquivos)
 
