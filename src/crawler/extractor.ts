@@ -20,7 +20,6 @@ export function extractBasicDocument(url: string, html: string): DocumentItem {
   };
 }
 
-/** utilidade: extrair links absolutos simples p/ descoberta */
 export function extractLinks(url: string, html: string): string[] {
   const $ = cheerio.load(html);
   const base = new URL(url);

@@ -26,18 +26,26 @@ export const TEAMS: Team[] = [
     { id: 'VIT', name: 'Vitória', aliases: ['Vitória', 'Esporte Clube Vitória', 'VIT', 'Leão da Barra', 'Rubro-Negro'] },
     { id: 'MIR', name: 'Mirassol', aliases: ['Mirassol', 'Mirassol Futebol Clube', 'MIR', 'Leão da Alta Araraquarense', 'Leãozão'] }
 ];
-export function normalizeTeamName(raw: string): string | undefined {
+
+export function normalizeTeamName(raw: string): string | undefined 
+{
   const x = raw.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
-  for (const t of TEAMS) {
-    for (const a of [t.name, ...t.aliases]) {
+
+  for (const t of TEAMS) 
+  {
+    for (const a of [t.name, ...t.aliases]) 
+    {
       const y = a.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
       if (x === y) return t.id;
     }
   }
   // fallback
-  for (const t of TEAMS) {
-    for (const a of [t.name, ...t.aliases]) {
+  for (const t of TEAMS) 
+  {
+    for (const a of [t.name, ...t.aliases]) 
+    {
       const y = a.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+
       if (x.includes(y) || y.includes(x)) return t.id;
     }
   }
