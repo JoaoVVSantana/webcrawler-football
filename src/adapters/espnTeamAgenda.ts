@@ -15,35 +15,35 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
   }
 
   extract(html: string, url: string) {
-    const fromJsonLd = this.extractFromJsonLd(html, url);
-    const $ = cheerio.load(html);
-    const fromHtml = fromJsonLd.length ? [] : this.extractFromHtml($, url);
-    const nextLinks = this.collectNextLinks($, url);
-    const matches = fromJsonLd.length ? fromJsonLd : fromHtml;
-    return { matches, nextLinks };
+    const jsonLdMatches = this.parseMatchesFromJsonLd(html, url);
+    const dom = cheerio.load(html);
+    const htmlMatches = jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
+    const allowedLinks = this.collectAllowedLinks(dom, url);
+    const matches = jsonLdMatches.length ? jsonLdMatches : htmlMatches;
+    return { matches, nextLinks: allowedLinks };
   }
 
-  private extractFromJsonLd(html: string, sourceUrl: string): MatchItem[] {
-    const out: MatchItem[] = [];
-    const blocks = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) ?? [];
-    for (const blk of blocks) {
+  private parseMatchesFromJsonLd(html: string, sourceUrl: string): MatchItem[] {
+    const matches: MatchItem[] = [];
+    const scriptBlocks = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) ?? [];
+    for (const scriptBlock of scriptBlocks) {
       try {
-        const jsonText = blk.replace(/^[\s\S]*?>/, '').replace(/<\/script>\s*$/i, '');
-        const data = JSON.parse(jsonText);
-        const arr = Array.isArray(data) ? data : [data];
-        for (const node of arr) {
-          if (node?.['@type'] === 'SportsEvent') {
-            const homeName = this.canonicalTeamName(node?.homeTeam?.name ?? node?.homeTeam);
-            const awayName = this.canonicalTeamName(node?.awayTeam?.name ?? node?.awayTeam);
-            const comp = node?.superEvent?.name ?? node?.competitor?.name ?? undefined;
-            const startIso = node?.startDate ? String(node.startDate) : undefined;
+        const jsonContent = scriptBlock.replace(/^[\s\S]*?>/, '').replace(/<\/script>\s*$/i, '');
+        const parsedData = JSON.parse(jsonContent);
+        const dataEntries = Array.isArray(parsedData) ? parsedData : [parsedData];
+        for (const entry of dataEntries) {
+          if (entry?.['@type'] === 'SportsEvent') {
+            const homeName = this.standardizeTeamName(entry?.homeTeam?.name ?? entry?.homeTeam);
+            const awayName = this.standardizeTeamName(entry?.awayTeam?.name ?? entry?.awayTeam);
+            const competitionName = entry?.superEvent?.name ?? entry?.competitor?.name ?? undefined;
+            const startIso = entry?.startDate ? String(entry.startDate) : undefined;
             if (homeName && awayName && startIso) {
-              out.push({
+              matches.push({
                 homeTeam: homeName,
                 awayTeam: awayName,
-                competition: comp,
+                competition: competitionName,
                 dateTimeUtc: startIso,
-                sourceUrl: sourceUrl,
+                sourceUrl,
                 sourceName: 'ESPN (competição)',
                 confidence: 0.8
               });
@@ -52,30 +52,35 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
         }
       } catch {}
     }
-    return this.dedupeMatches(out);
+    return this.deduplicateMatches(matches);
   }
 
-  private extractFromHtml($: cheerio.CheerioAPI, sourceUrl: string): MatchItem[] {
+  private parseMatchesFromHtml(dom: cheerio.CheerioAPI, sourceUrl: string): MatchItem[] {
     const matches: MatchItem[] = [];
 
-    $('article, li, [class*=match], [class*=game]').each((_, el) => {
-      const text = $(el).text().replace(/\s+/g, ' ').trim();
+    dom('article, li, [class*=match], [class*=game]').each((_, element) => 
+    {
+      const text = dom(element).text().replace(/\s+/g, ' ').trim();
       if (!text || !/[xX]/.test(text)) return;
-      const vs = text.match(/([A-Za-zÀ-ÿ\.\s'\-]{3,})\s+[xX]\s+([A-Za-zÀ-ÿ\.\s'\-]{3,})/);
-      if (!vs) return;
+
+      const teamsMatch = text.match(/([A-Za-zÀ-ÿ\.\s'\-]{3,})\s+[xX]\s+([A-Za-zÀ-ÿ\.\s'\-]{3,})/);
+      if (!teamsMatch) return;
+
+      const homeTeamName = teamsMatch[1];
+      const awayTeamName = teamsMatch[2];
 
       const dateMatch =
         text.match(/(\d{1,2}\/\d{1,2}(?:\/\d{4})?)/) ||
         text.match(/(\d{1,2}\s+de\s+[A-Za-zÀ-ÿ]+)/i);
       const timeMatch = text.match(/(\d{1,2}:\d{2})/);
-      const when = dateMatch && timeMatch ? `${dateMatch[0]} ${timeMatch[0]}` : undefined;
+      const dateTimeText = dateMatch && timeMatch ? `${dateMatch[0]} ${timeMatch[0]}` : undefined;
 
-      const { local, utc } = when ? parsePtBrDateTimeToIso(when) : ({} as any);
+      const { local, utc } = dateTimeText ? parsePtBrDateTimeToIso(dateTimeText) : ({} as any);
       if (!local && !utc) return;
 
       matches.push({
-        homeTeam: this.canonicalTeamName(vs[1]),
-        awayTeam: this.canonicalTeamName(vs[2]),
+        homeTeam: this.standardizeTeamName(homeTeamName),
+        awayTeam: this.standardizeTeamName(awayTeamName),
         dateTimeLocal: local,
         dateTimeUtc: utc,
         sourceUrl,
@@ -84,6 +89,6 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
       });
     });
 
-    return this.dedupeMatches(matches);
+    return this.deduplicateMatches(matches);
   }
 }

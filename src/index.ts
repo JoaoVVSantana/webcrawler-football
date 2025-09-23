@@ -1,89 +1,90 @@
-import { CONFIG } from './config';
-import { Frontier } from './crawler/frontier';
+import { CRAWLER_CONFIG } from './config';
+import { CrawlFrontier } from './crawler/frontier';
 import { fetchHtml } from './crawler/fetcher';
-import { extractBasicDocument, extractLinks, hashHtml } from './crawler/extractor';
-import { isHttpUrl } from './utils/url';
-import { storeDocument, upsertMatches } from './pipelines/store';
+import { createDocumentMetadata, extractUniqueLinks } from './crawler/extractor';
+import { isHttpOrHttpsUrl } from './utils/url';
+import { persistDocumentMetadata, persistMatches } from './pipelines/store';
 import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
 import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
 import { Adapter, CrawlTask } from './types';
-import { saveMatchesToCsv } from './pipelines/csvStore';
+import { appendMatchesToCsv } from './pipelines/csvStore';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
   new EspnTeamAgendaAdapter()
 ];
 
-function pickAdapter(url: string): Adapter | undefined {
-  const u = url.toLowerCase();
-  return adapters.find(a => a.whitelistPatterns.some(p => p.test(u)));
+function findAdapterForUrl(url: string): Adapter | undefined {
+  const normalizedUrl = url.toLowerCase();
+  return adapters.find(adapter => adapter.whitelistPatterns.some(pattern => pattern.test(normalizedUrl)));
 }
 
-async function processTask(task: CrawlTask, frontier: Frontier) {
-  const res = await fetchHtml(task.url);
-  if (!res) return;
+async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier) {
+  const response = await fetchHtml(crawlerTask.url);
+  if (!response) return;
 
-  const html = res.body;
-  const doc = extractBasicDocument(task.url, html);
-  doc.status = res.statusCode;
+  const html = response.body;
+  const documentMetadata = createDocumentMetadata(crawlerTask.url, html);
+  documentMetadata.status = response.statusCode;
 
-  await storeDocument(doc);
+  await persistDocumentMetadata(documentMetadata);
 
-  const adapter = pickAdapter(task.url);
-  if (adapter) {
-  
-    const { matches = [], nextLinks = [] } = adapter.extract(html, task.url);
+  const selectedAdapter = findAdapterForUrl(crawlerTask.url);
+  if (selectedAdapter) {
+
+    const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url);
     //console.log({ url: task.url, found: matches.length }, 'EXTRACT');
     if (matches.length) 
     {
-      await upsertMatches(matches);      
-      await saveMatchesToCsv(matches);    
+      await persistMatches(matches);      
+      await appendMatchesToCsv(matches);    
     }
 
     for (const link of nextLinks) 
     {
       try 
       {
-        const abs = new URL(link, task.url).toString();
+        const currentLink = new URL(link, crawlerTask.url).toString();
 
-        if (!isHttpUrl(abs)) continue;
+        if (!isHttpOrHttpsUrl(currentLink)) continue;
 
-        if (!adapter.whitelistPatterns.some(p => p.test(abs))) continue;
+        if (!selectedAdapter.whitelistPatterns.some(pattern => pattern.test(currentLink))) continue;
 
-        if (frontier.has(abs)) continue; // <-- evita duplicar
+        if (frontier.has(currentLink)) continue; // <-- evita duplicar
 
-        frontier.push({ url: abs, depth: (task.depth ?? 0) + 1, priority: (task.priority ?? 0) - 1 });
+        frontier.push({ url: currentLink, depth: (crawlerTask.depth ?? 0) + 1, priority: (crawlerTask.priority ?? 0) - 1 });
       } 
       catch { }
     }
 
   } else {
-    const _links = extractLinks(task.url, html);
+    const _links = extractUniqueLinks(crawlerTask.url, html);
   }
 }
 
 async function main() {
-  if (CONFIG.seeds.length === 0) {
-    //console.log('Nenhuma seed definida. Configure SEEDS no .env');
+  if (CRAWLER_CONFIG.seeds.length === 0) {
+    console.log('Nenhuma seed definida. Configure SEEDS no .env');
     process.exit(1);
   }
 
-  //console.log({ seeds: CONFIG.seeds }, 'Iniciando crawler');
-  const frontier = new Frontier();
+  console.log({ seeds: CRAWLER_CONFIG.seeds }, 'Iniciando crawler');
+  const frontier = new CrawlFrontier();
 
-  for (const seed of CONFIG.seeds) {
+  for (const seed of CRAWLER_CONFIG.seeds) {
     frontier.push({ url: seed, depth: 0, priority: 100 });
   }
 
   let processed = 0;
-  const MAX_PAGES = 200;
+  const maxPagesToProcess = 200;
 
-  while (frontier.size() > 0 && processed < MAX_PAGES) 
+  while (frontier.size() > 0 && processed < maxPagesToProcess) 
   {
     const task = frontier.pop()!;
     try 
     {
-      await processTask(task, frontier);
+      await processCrawlTask(task, frontier);
+
     } 
     catch (e: any) 
     {
@@ -92,7 +93,7 @@ async function main() {
     processed++;
   }
 
-  //console.log({ processed }, 'Crawler finalizado (limite atingido ou frontier vazia)');
+  console.log({ processed }, 'Crawler finalizado');
 }
 
 main().catch(err => {

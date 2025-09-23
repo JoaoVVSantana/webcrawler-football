@@ -1,132 +1,144 @@
 import type { CheerioAPI } from 'cheerio';
-import { TEAMS, normalizeTeamName } from '../data/brasilTeams';
+import { BRAZIL_TEAMS, mapTeamNameToId } from '../data/brasilTeams';
 import type { Adapter, PageType, MatchItem } from '../types';
 import { canonicalizeUrl } from '../utils/url';
 
 type Broadcast = NonNullable<MatchItem['whereToWatch']>[number];
 
-export abstract class BaseAdapter implements Adapter {
+export abstract class BaseAdapter implements Adapter 
+{
   abstract domain: string;
   abstract whitelistPatterns: RegExp[];
 
-  protected TEAM_BY_ID = new Map(TEAMS.map(t => [t.id, t]));
-  protected BROADCAST_SKIP_KEYWORDS = ['cartola', 'ingresso', 'ingressos', 'seja pro'];
+  protected teamsById = new Map(BRAZIL_TEAMS.map(team => [team.id, team]));
+  protected broadcastExclusionKeywords = ['cartola', 'ingresso', 'ingressos', 'seja pro'];
 
-  classify(url: string): PageType {
-    const u = url.toLowerCase();
-    if (u.includes('onde-assistir')) return 'onde-assistir' as PageType;
-    if (u.includes('/noticia') || u.includes('/noticias/')) return 'noticia' as PageType;
-    if (u.includes('agenda') || u.includes('calend') || u.includes('tabela') || u.includes('rodada')) return 'agenda' as PageType;
+  classify(url: string): PageType 
+  {
+    const lowerCaseUrl = url.toLowerCase();
+    if (lowerCaseUrl.includes('onde-assistir')) return 'onde-assistir' as PageType;
+    if (lowerCaseUrl.includes('/noticia') || lowerCaseUrl.includes('/noticias/')) return 'noticia' as PageType;
+    if (lowerCaseUrl.includes('agenda') || lowerCaseUrl.includes('calend') || lowerCaseUrl.includes('tabela') || lowerCaseUrl.includes('rodada')) return 'agenda' as PageType;
     return 'outro' as PageType;
   }
 
   abstract extract(html: string, url: string): ReturnType<Adapter['extract']>;
 
-  protected canonicalTeamName(raw?: string | null): string | undefined {
-    if (!raw) return undefined;
-    const name = raw.trim();
-    if (!name) return undefined;
-    const id = normalizeTeamName(name);
-    if (!id) return name;
-    const team = this.TEAM_BY_ID.get(id);
-    return team?.name ?? name;
+  protected standardizeTeamName(extractedTeamName?: string | null): string | undefined 
+  {
+    if (!extractedTeamName) return undefined;
+    const trimmedTeamName = extractedTeamName.trim();
+
+    if (!trimmedTeamName) return undefined;
+    const teamId = mapTeamNameToId(trimmedTeamName);
+
+    if (!teamId) return trimmedTeamName;
+    const team = this.teamsById.get(teamId);
+
+    return team?.name ?? trimmedTeamName;
   }
 
-  protected dedupeMatches(items: MatchItem[]): MatchItem[] 
+  protected deduplicateMatches(matches: MatchItem[]): MatchItem[] 
   {
-    const seen = new Set<string>();
-    const result: MatchItem[] = [];
+    const seenMatches = new Set<string>();
+    const uniqueMatches: MatchItem[] = [];
 
-    for (const item of items) 
+    for (const currentMatch of matches) 
     {
-      const key = `${item.homeTeam ?? ''}|${item.awayTeam ?? ''}|${item.dateTimeUtc ?? item.dateTimeLocal ?? ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      result.push(item);
+      const key = `${currentMatch.homeTeam ?? ''}|${currentMatch.awayTeam ?? ''}|${currentMatch.dateTimeUtc ?? currentMatch.dateTimeLocal ?? ''}`;
+      if (seenMatches.has(key)) continue;
+
+      seenMatches.add(key);
+
+      uniqueMatches.push(currentMatch);
     }
-    return result;
+
+    return uniqueMatches;
   }
 
-  protected collectNextLinks($: CheerioAPI, baseUrl: string): string[] 
+  protected collectAllowedLinks(dom: CheerioAPI, baseUrl: string): string[]
   {
-    const links = new Set<string>();
+    const allowedLinks = new Set<string>();
+    const canonicalBaseUrl = canonicalizeUrl(baseUrl);
 
-    const self = canonicalizeUrl(baseUrl);
-
-    $('a[href]').each((_, a) => 
+    dom('a[href]').each((_, anchor) =>
     {
-      const href = String($(a).attr('href') ?? '');
+      const rawHref = dom(anchor).attr('href');
+      const normalizedHref = rawHref?.trim();
+      if (!normalizedHref) return;
+      if (normalizedHref.startsWith('javascript:') || normalizedHref.startsWith('mailto:')) return;
 
-      if (!href) return;
-
-      try 
+      try
       {
-        const abs = new URL(href, baseUrl).toString();
+        const resolvedUrl = new URL(normalizedHref, baseUrl).toString();
+        if (!this.whitelistPatterns.some(pattern => pattern.test(resolvedUrl))) return;
 
-        if (!this.whitelistPatterns.some(rx => rx.test(abs))) return;
+        const normalizedUrl = canonicalizeUrl(resolvedUrl);
+        if (normalizedUrl === canonicalBaseUrl) return;
 
-        const canon = canonicalizeUrl(abs);
-
-        if (canon === self) return; 
-
-        links.add(canon);
-      } 
-      catch 
-      { 
+        allowedLinks.add(normalizedUrl);
+      }
+      catch
+      {
         // do nothing
       }
     });
 
-    return Array.from(links);
+    return Array.from(allowedLinks);
   }
 
-  protected extractJsonBlock(source: string, marker: string): string | undefined 
+  protected extractJsonObjectAtMarker(source: string, marker: string): string | undefined 
   {
     const markerIndex = source.indexOf(marker);
     if (markerIndex === -1) return undefined;
+
     const start = source.indexOf('{', markerIndex);
     if (start === -1) return undefined;
 
     let depth = 0;
-    for (let i = start; i < source.length; i++) 
+    for (let iteration = start; iteration < source.length; iteration++) 
     {
-      const ch = source[i];
-      if (ch === '{') depth++;
-      else if (ch === '}') 
+      const character = source[iteration];
+
+      if (character === '{') depth++;
+
+      else if (character === '}') 
       {
         depth--;
         if (depth === 0) 
         {
-          return source.slice(start, i + 1);
+          return source.slice(start, iteration + 1);
         }
       }
     }
     return undefined;
   }
 
-  protected mapWatchSource(name?: string, url?: string): Broadcast | undefined 
+  protected mapBroadcastSource(name?: string, url?: string): Broadcast | undefined 
   {
     if (!name) return undefined;
 
     const provider = name.trim();
     if (!provider) return undefined;
 
-    const lower = provider.toLowerCase();
+    const lowercaseProvider = provider.toLowerCase();
 
-    if (this.BROADCAST_SKIP_KEYWORDS.some(k => lower.includes(k))) return undefined;
+    if (this.broadcastExclusionKeywords.some(keyword => lowercaseProvider.includes(keyword))) return undefined;
 
     let type: Broadcast['type'] = 'streaming';
-    if (lower.includes('youtube')) type = 'youtube';
+    if (lowercaseProvider.includes('youtube')) type = 'youtube';
 
-    else if (lower.includes('globo')
-      || lower.includes('band') 
-      || lower.includes('sbt')) type = 'tv_aberta';
+    else if (lowercaseProvider.includes('globo')
+      || lowercaseProvider.includes('band') 
+      || lowercaseProvider.includes('sbt')) type = 'tv_aberta';
 
     else if (
-      lower.includes('premiere') || lower.includes('sportv') ||
-      lower.includes('espn') || lower.includes('tnt') 
+      lowercaseProvider.includes('premiere') || lowercaseProvider.includes('sportv') ||
+      lowercaseProvider.includes('espn') || lowercaseProvider.includes('tnt') 
     ) type = 'tv_fechada';
 
     return { type, provider, url: url?.trim() || undefined };
   }
 }
+
+

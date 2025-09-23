@@ -2,119 +2,118 @@ import got, { Response } from 'got';
 import Bottleneck from 'bottleneck';
 import robotsParser from 'robots-parser';
 import { CookieJar } from 'tough-cookie';
-import { CONFIG } from '../config';
+import { CRAWLER_CONFIG } from '../config';
 
-const domainLimiters = new Map<string, Bottleneck>();
-const robotsCache = new Map<string, ReturnType<typeof robotsParser>>();
+const hostRateLimiters = new Map<string, Bottleneck>();
+const robotsTxtParsers = new Map<string, ReturnType<typeof robotsParser>>();
 
-function getLimiter(hostname: string) 
+function getRateLimiter(hostname: string) 
 {
-  if (!domainLimiters.has(hostname)) 
+  if (!hostRateLimiters.has(hostname)) 
   {
-    const limiter = new Bottleneck({
-      reservoir: CONFIG.perDomainRps,//requests por "tick"
-      reservoirRefreshAmount: CONFIG.perDomainRps, 
+    const rateLimiter = new Bottleneck({
+      reservoir: CRAWLER_CONFIG.perDomainRps,
+      reservoirRefreshAmount: CRAWLER_CONFIG.perDomainRps, 
       reservoirRefreshInterval: 1000,
       maxConcurrent: 1
     });
 
-    domainLimiters.set(hostname, limiter);
+    hostRateLimiters.set(hostname, rateLimiter);
 
   }
-  return domainLimiters.get(hostname)!;
+  return hostRateLimiters.get(hostname)!;
 }
 
-async function getRobotsForOrigin(origin: string) 
+async function loadRobotsParserForOrigin(origin: string) 
 {
-  if (robotsCache.has(origin)) return robotsCache.get(origin)!;
+  if (robotsTxtParsers.has(origin)) return robotsTxtParsers.get(origin)!;
 
   const robotsUrl = `${origin}/robots.txt`;
   try 
   {
-    const res = await got(robotsUrl, { timeout: { request: 5000 }, throwHttpErrors: false });
+    const response = await got(robotsUrl, { timeout: { request: 5000 }, throwHttpErrors: false });
 
-    const body = res.statusCode >= 400 ? '' : res.body;
+    const body = response.statusCode >= 400 ? '' : response.body;
 
-    const parser = robotsParser(robotsUrl, body);
+    const robotsTxtParser = robotsParser(robotsUrl, body);
 
-    robotsCache.set(origin, parser);
+    robotsTxtParsers.set(origin, robotsTxtParser);
 
-    return parser;
+    return robotsTxtParser;
 
   } catch {
-    const parser = robotsParser('', '');
-    robotsCache.set(origin, parser);
-    return parser;
+    const robotsTxtParser = robotsParser('', '');
+    robotsTxtParsers.set(origin, robotsTxtParser);
+    return robotsTxtParser;
   }
 }
 
-function looksLikeSoft404(html: string) {
-  const lower = html.toLowerCase();
+function isSoft404Response(html: string) {
+  const normalizedHtml = html.toLowerCase();
   return (
-    lower.includes('erro 404') ||
-    lower.includes('página não encontrada') ||
-    lower.includes('pagina não encontrada') ||
-    lower.includes('not found') ||
-    lower.includes('404 -') ||
-    lower.includes('404 –') ||
-    lower.includes('error 404')
+    normalizedHtml.includes('erro 404') ||
+    normalizedHtml.includes('página não encontrada') ||
+    normalizedHtml.includes('pagina não encontrada') ||
+    normalizedHtml.includes('not found') ||
+    normalizedHtml.includes('404 -') ||
+    normalizedHtml.includes('404 –') ||
+    normalizedHtml.includes('error 404')
   );
 }
 
 export async function fetchHtml(url: string): Promise<Response<string> | null> {
-  const newUrl = new URL(url);
-  const origin = newUrl.origin;      
-  const hostname = newUrl.hostname;
+  const parsedUrl = new URL(url);
+  const origin = parsedUrl.origin;      
+  const hostname = parsedUrl.hostname;
 
-  // Robots.txt (apenas se habilitado)
-  if (CONFIG.respectRobots) 
+  if (CRAWLER_CONFIG.respectRobots) 
   {
-    const robots = await getRobotsForOrigin(origin);
+    const robotsParserInstance = await loadRobotsParserForOrigin(origin);
 
-    if (!robots.isAllowed(url, CONFIG.userAgent)) 
+    if (!robotsParserInstance.isAllowed(url, CRAWLER_CONFIG.userAgentHeader)) 
     {
       //console.log({ url }, 'Bloqueado por robots.txt');
       return null;
     }
   }
 
-  const limiter = getLimiter(hostname);
+  const rateLimiter = getRateLimiter(hostname);
 
-  return limiter.schedule(async () => {
+  return rateLimiter.schedule(async () => {
     //console.log({ url }, 'GET');
 
     try 
     {
-      const res = await got<string>(url, 
+      const response = await got<string>(url, 
       {
         headers: 
         {
-          'user-agent': CONFIG.userAgent,
-          'accept': 'text/html,application/xhtml+xml',
-          'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'
+          'user-agent': CRAWLER_CONFIG.userAgentHeader,
+          'accept': CRAWLER_CONFIG.acceptHeader,
+          'accept-language': CRAWLER_CONFIG.languageHeader
         },
         cookieJar: new CookieJar(),
-        timeout: { request: CONFIG.requestTimeoutMs },
+        timeout: { request: CRAWLER_CONFIG.requestTimeoutMs },
         http2: true,
         decompress: true,
         throwHttpErrors: false,
         followRedirect: true
       });
 
-      const bytes = (res.rawBody as any)?.length ?? 0;
-      //console.log({ status: res.statusCode, bytes }, 'RESP');
+      const responseByteLength = (response.rawBody as any)?.length ?? 0;
+      //console.log({ status: res.statusCode, bytes: responseByteLength }, 'RESP');
 
-      if (res.statusCode >= 400) {
-        //console.log({ url, status: res.statusCode }, 'Descartado (status >= 400)');
+      if (response.statusCode >= 400) {
+        //console.log({ url, status: response.statusCode }, 'Descartado (status >= 400)');
         return null;
       }
 
-      if (res.body && looksLikeSoft404(res.body)) {
+      if (response.body && isSoft404Response(response.body)) {
         //console.log({ url }, 'Descartado (soft-404 detectado)');
         return null;
       }
 
-      return res;
+      return response;
 
     } 
     catch (e: any) 

@@ -1,60 +1,75 @@
 import { DateTime } from 'luxon';
 
 export function parsePtBrDateTimeToIso(datetimeText: string, defaultYear?: number) {
-  const cleaned = datetimeText
+  const normalizedText = datetimeText
     .replace(/\s+/g, ' ')
     .replace(/de\s+/gi, ' ')
     .trim();
 
-  const isoCandidates = [cleaned, cleaned.replace(/\s+(?=\d{1,2}:\d{2})/, 'T')];
-  let dt: DateTime | undefined;
+  const candidateIsoInputs = [normalizedText, normalizedText.replace(/\s+(?=\d{1,2}:\d{2})/, 'T')];
+  let parsedDate: DateTime | undefined;
 
-  for (const candidate of isoCandidates) {
+  for (const candidate of candidateIsoInputs) 
+  {
     const parsed = DateTime.fromISO(candidate, { zone: 'America/Sao_Paulo', locale: 'pt-BR' });
-    if (parsed.isValid) {
-      dt = parsed;
+    if (parsed.isValid) 
+    {
+      parsedDate = parsed;
       break;
     }
   }
 
-  if (!dt) {
-    const m = cleaned.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{4}))?(?:\s+|\s*-\s*)(\d{1,2}):(\d{2})/);
-    if (m) {
-      const [, d, mo, y, hh, mm] = m;
-      const year = y ? Number(y) : (defaultYear ?? DateTime.now().year);
-      const candidate = DateTime.fromObject(
-        { day: Number(d), month: Number(mo), year, hour: Number(hh), minute: Number(mm) },
+  if (!parsedDate) 
+  {
+    const numericDateMatch = normalizedText.match(/(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{4}))?(?:\s+|\s*-\s*)(\d{1,2}):(\d{2})/);
+    if (numericDateMatch) 
+    {
+      const [, dayString, monthString, yearString, hourString, minuteString] = numericDateMatch;
+      const resolvedYear = yearString ? Number(yearString) : (defaultYear ?? DateTime.now().year);
+      const candidateDateTime = DateTime.fromObject(
+        {
+          day: Number(dayString),
+          month: Number(monthString),
+          year: resolvedYear,
+          hour: Number(hourString),
+          minute: Number(minuteString)
+        },
         { zone: 'America/Sao_Paulo', locale: 'pt-BR' }
       );
-      if (candidate.isValid) dt = candidate;
+      if (candidateDateTime.isValid) parsedDate = candidateDateTime;
     }
   }
 
-  if (!dt) {
-    const m2 = cleaned.match(/(\d{1,2})\s+([A-Za-z??????%ua???"???????"o??]+).*?(\d{1,2}):(\d{2})/);
-    if (m2) {
-      const [, d2, monthName, hh2, mm2] = m2;
-      let candidate = DateTime.fromFormat(`${d2} ${monthName} ${hh2}:${mm2}`, 'd LLLL HH:mm', {
+  if (!parsedDate) 
+  {
+    const monthNameMatch = normalizedText.match(/(\d{1,2})\s+([A-Za-z??????%ua???"???????"o??]+).*?(\d{1,2}):(\d{2})/);
+    if (monthNameMatch) 
+    {
+      const [, dayString, monthName, hourString, minuteString] = monthNameMatch;
+      let candidateDateTime = DateTime.fromFormat(`${dayString} ${monthName} ${hourString}:${minuteString}`, 'd LLLL HH:mm', {
         zone: 'America/Sao_Paulo',
         locale: 'pt-BR'
       });
-      if (!candidate.isValid) {
-        candidate = DateTime.fromFormat(
-          `${d2} ${monthName} ${defaultYear ?? DateTime.now().year} ${hh2}:${mm2}`,
+      if (!candidateDateTime.isValid) 
+      {
+        candidateDateTime = DateTime.fromFormat(
+          `${dayString} ${monthName} ${defaultYear ?? DateTime.now().year} ${hourString}:${minuteString}`,
           'd LLLL yyyy HH:mm',
           { zone: 'America/Sao_Paulo', locale: 'pt-BR' }
         );
       }
-      if (candidate.isValid) dt = candidate;
+      if (candidateDateTime.isValid) parsedDate = candidateDateTime;
     }
   }
 
-  if (!dt) {
-    const isoMatch = cleaned.match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
-    if (isoMatch) {
+  if (!parsedDate) 
+  {
+    const isoMatch = normalizedText.match(/(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (isoMatch) 
+    {
       const [, yearStr, monthStr, dayStr, hourStr, minuteStr, secondStr] = isoMatch;
       const zone = isoMatch[0].includes('Z') ? 'utc' : 'America/Sao_Paulo';
-      const candidate = DateTime.fromObject(
+      const candidateDateTime = DateTime.fromObject(
         {
           year: Number(yearStr),
           month: Number(monthStr),
@@ -65,12 +80,13 @@ export function parsePtBrDateTimeToIso(datetimeText: string, defaultYear?: numbe
         },
         { zone, locale: 'pt-BR' }
       );
-      if (candidate.isValid) {
-        dt = candidate.setZone('America/Sao_Paulo');
+      if (candidateDateTime.isValid) 
+      {
+        parsedDate = candidateDateTime.setZone('America/Sao_Paulo');
       }
     }
   }
 
-  if (!dt) return {};
-  return { local: dt.toISO() ?? undefined, utc: dt.toUTC().toISO() ?? undefined };
+  if (!parsedDate) return {};
+  return { local: parsedDate.toISO() ?? undefined, utc: parsedDate.toUTC().toISO() ?? undefined };
 }

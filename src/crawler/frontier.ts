@@ -1,41 +1,41 @@
 import { canonicalizeUrl } from '../utils/url';
 import type { CrawlTask } from '../types';
 
-export class Frontier {
-  private q: CrawlTask[] = [];
-  private enqueued = new Set<string>();
-  private visited = new Set<string>();
+export class CrawlFrontier {
+  private queue: CrawlTask[] = [];
+  private queuedUrls = new Set<string>();
+  private visitedUrls = new Set<string>();
 
-  size(): number { return this.q.length; }
+  size(): number { return this.queue.length; }
 
   push(task: CrawlTask): void 
   {
-    const url = canonicalizeUrl(task.url);
+    const normalizedUrl = canonicalizeUrl(task.url);
 
-    const maxDepth = Number(process.env.MAX_DEPTH ?? 2);
+    const maximumDepth = Number(process.env.MAX_DEPTH ?? 2);
     
-    if ((task.depth ?? 0) > maxDepth) return;
+    if ((task.depth ?? 0) > maximumDepth) return;
 
     // dedup: se já visitou ou já está na fila, ignora
-    if (this.visited.has(url) || this.enqueued.has(url)) return;
+    if (this.visitedUrls.has(normalizedUrl) || this.queuedUrls.has(normalizedUrl)) return;
 
     // normaliza a task
-    const norm: CrawlTask = { ...task, url };
-    this.q.push(norm);
-    this.enqueued.add(url);
+    const normalizedTask: CrawlTask = { ...task, url: normalizedUrl };
+    this.queue.push(normalizedTask);
+    this.queuedUrls.add(normalizedUrl);
   }
 
   pop(): CrawlTask | undefined {
-    const t = this.q.shift();
-    if (!t) return undefined;
-    const url = canonicalizeUrl(t.url);
-    this.enqueued.delete(url);
-    this.visited.add(url);
-    return t;
+    const nextTask = this.queue.shift();
+    if (!nextTask) return undefined;
+    const normalizedUrl = canonicalizeUrl(nextTask.url);
+    this.queuedUrls.delete(normalizedUrl);
+    this.visitedUrls.add(normalizedUrl);
+    return nextTask;
   }
 
   has(url: string): boolean {
-    const u = canonicalizeUrl(url);
-    return this.enqueued.has(u) || this.visited.has(u);
+    const normalizedUrl = canonicalizeUrl(url);
+    return this.queuedUrls.has(normalizedUrl) || this.visitedUrls.has(normalizedUrl);
   }
 }

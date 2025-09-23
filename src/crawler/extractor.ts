@@ -2,11 +2,11 @@ import * as crypto from 'crypto';
 import * as cheerio from 'cheerio';
 import { DocumentItem } from '../types';
 
-export function hashHtml(html: string): string {
+export function generateHtmlHash(html: string): string {
   return crypto.createHash('sha256').update(html).digest('hex');
 }
 
-export function extractBasicDocument(url: string, html: string): DocumentItem {
+export function createDocumentMetadata(url: string, html: string): DocumentItem {
   const $ = cheerio.load(html);
   const title = $('title').first().text().trim() || undefined;
   const lang = $('html').attr('lang') || undefined;
@@ -16,20 +16,20 @@ export function extractBasicDocument(url: string, html: string): DocumentItem {
     status: 200,
     title,
     lang,
-    rawHtmlHash: hashHtml(html)
+    rawHtmlHash: generateHtmlHash(html)
   };
 }
 
-export function extractLinks(url: string, html: string): string[] {
+export function extractUniqueLinks(url: string, html: string): string[] {
   const $ = cheerio.load(html);
-  const base = new URL(url);
-  const links = new Set<string>();
+  const baseUrl = new URL(url);
+  const uniqueLinks = new Set<string>();
   $('a[href]').each((_, a) => {
     const href = $(a).attr('href')!;
     try {
-      const abs = new URL(href, base).toString();
-      links.add(abs);
+      const resolvedHref = new URL(href, baseUrl).toString();
+      uniqueLinks.add(resolvedHref);
     } catch {}
   });
-  return [...links];
+  return [...uniqueLinks];
 }

@@ -231,3 +231,10 @@ Amostra de 50–200 páginas coletadas com logs (para demonstrar politeness e ex
 Dataset inicial de partidas futuras (JSON/CSV) com team_home, team_away, datetime_local, where_to_watch, link.
 
 Métricas iniciais: páginas coletadas por fonte, taxa de extração com sucesso, exemplos de conflitos resolvidos.
+## TODO de Melhorias
+
+- Consolidar a persistência de documentos e partidas em PostgreSQL e Elasticsearch, substituindo os stubs em src/pipelines/store.ts e aplicando deduplicação no banco.
+- Evoluir a Frontier para uma fila priorizada e persistente, com suporte a múltiplos workers e retomada após falhas.
+- Implementar um scheduler distribuído com politeness por domínio, monitoramento (Prometheus/Grafana) e alarmes de falha.
+- Padronizar os adaptadores com contratos bem definidos e testes de regressão, validando seletores e estruturas schema.org.
+- Automatizar o pipeline de dados: validação, geração de CSV/JSON versionados e disponibilização via API pública.

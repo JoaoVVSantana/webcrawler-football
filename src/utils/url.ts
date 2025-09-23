@@ -1,35 +1,40 @@
-export function getDomain(url: string): string {
+export function extractHostname(url: string): string {
   try { return new URL(url).hostname; } catch { return 'unknown'; }
 }
-export function sameDomain(a: string, b: string): boolean {
-  return getDomain(a) === getDomain(b);
+
+export function haveMatchingHostnames(firstUrl: string, secondUrl: string): boolean {
+  return extractHostname(firstUrl) === extractHostname(secondUrl);
 }
 
-export function isHttpUrl(u: string): boolean {
+export function isHttpOrHttpsUrl(candidateUrl: string): boolean {
   try {
-    const p = new URL(u);
-    return p.protocol === 'http:' || p.protocol === 'https:';
+    const parsedUrl = new URL(candidateUrl);
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
   } catch { return false; }
 }
 
 /** Normaliza para comparar/armazenar: remove fragmento, normaliza host, ordena query (sem utm_*), resolve barra final. */
 export function canonicalizeUrl(input: string): string {
-  const u = new URL(input);
+  const parsedUrl = new URL(input);
 
-  u.hostname = u.hostname.toLowerCase();
+  parsedUrl.hostname = parsedUrl.hostname.toLowerCase();
 
-  u.hash = '';
+  parsedUrl.hash = '';
 
-  const kept = new URLSearchParams();
-  const entries = Array.from(u.searchParams.entries())
-    .filter(([k]) => !/^utm_|^gclid$|^fbclid$/i.test(k));
-  entries.sort(([a], [b]) => a.localeCompare(b));
-  for (const [k, v] of entries) kept.append(k, v);
-  u.search = kept.toString() ? `?${kept.toString()}` : '';
+  const filteredQueryParams = new URLSearchParams();
+  const sortedParams = Array.from(parsedUrl.searchParams.entries())
+    .filter(([key]) => !/^utm_|^gclid$|^fbclid$/i.test(key));
 
-  if (u.pathname !== '/' && u.pathname.endsWith('/')) {
-    u.pathname = u.pathname.replace(/\/+$/, '');
+  sortedParams.sort(([firstKey], [secondKey]) => firstKey.localeCompare(secondKey));
+
+  for (const [key, value] of sortedParams) filteredQueryParams.append(key, value);
+
+  parsedUrl.search = filteredQueryParams.toString() ? `?${filteredQueryParams.toString()}` : '';
+
+  if (parsedUrl.pathname !== '/' && parsedUrl.pathname.endsWith('/')) 
+  {
+    parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, '');
   }
 
-  return u.toString();
+  return parsedUrl.toString();
 }

@@ -3,7 +3,7 @@ import * as CsvWriter from 'csv-writer';
 import { DateTime } from 'luxon';
 import { MatchItem } from '../types';
 
-const OUTPUT_PATH = 'result/matches.csv';
+const CSV_OUTPUT_PATH = 'result/matches.csv';
 
 type CsvRecord = {
   homeTeam: string;
@@ -17,7 +17,7 @@ type CsvRecord = {
 };
 
 const csvWriter = CsvWriter.createObjectCsvWriter<CsvRecord>({
-  path: OUTPUT_PATH,
+  path: CSV_OUTPUT_PATH,
   header: [
     { id: 'homeTeam', title: 'HomeTeam' },
     { id: 'awayTeam', title: 'AwayTeam' },
@@ -31,119 +31,120 @@ const csvWriter = CsvWriter.createObjectCsvWriter<CsvRecord>({
   append: true
 });
 
-const existingKeys = new Set<string>();
+const existingMatchKeys = new Set<string>();
 
-function stripQuotes(value?: string) {
+function stripSurroundingQuotes(value?: string) {
   if (!value) return '';
   return value.replace(/^"/, '').replace(/"$/, '').trim();
 }
 
-function normalize(value?: string | null) {
+function normalizeKeyValue(value?: string | null) {
   return value ? value.trim().toLowerCase() : '';
 }
 
-function buildMatchKeyFromValues(
+function buildMatchKeyFromRawValues(
   homeTeam: string,
   awayTeam: string,
   dateTimeLocal: string,
   dateTimeUtc: string,
   sourceUrl: string
 ): string | undefined {
-  const home = normalize(homeTeam);
-  const away = normalize(awayTeam);
-  const when = normalize(dateTimeUtc) || normalize(dateTimeLocal);
-  const source = normalize(sourceUrl);
-  const pivot = when || source;
-  if (!home || !away || !pivot) return undefined;
-  return `${home}|${away}|${pivot}`;
+  const normalizedHome = normalizeKeyValue(homeTeam);
+  const normalizedAway = normalizeKeyValue(awayTeam);
+  const normalizedDate = normalizeKeyValue(dateTimeUtc) || normalizeKeyValue(dateTimeLocal);
+  const normalizedSource = normalizeKeyValue(sourceUrl);
+  const pivot = normalizedDate || normalizedSource;
+  if (!normalizedHome || !normalizedAway || !pivot) return undefined;
+  return `${normalizedHome}|${normalizedAway}|${pivot}`;
 }
 
-function buildMatchKey(match: MatchItem): string | undefined {
-  const home = normalize(match.homeTeam);
-  const away = normalize(match.awayTeam);
-  const when = normalize(match.dateTimeUtc ?? match.dateTimeLocal);
-  const source = normalize(match.sourceUrl);
-  const pivot = when || source;
-  if (!home || !away || !pivot) return undefined;
-  return `${home}|${away}|${pivot}`;
+function deriveMatchKey(match: MatchItem): string | undefined {
+  const normalizedHome = normalizeKeyValue(match.homeTeam);
+  const normalizedAway = normalizeKeyValue(match.awayTeam);
+  const normalizedDate = normalizeKeyValue(match.dateTimeUtc ?? match.dateTimeLocal);
+  const normalizedSource = normalizeKeyValue(match.sourceUrl);
+  const pivot = normalizedDate || normalizedSource;
+  if (!normalizedHome || !normalizedAway || !pivot) return undefined;
+  return `${normalizedHome}|${normalizedAway}|${pivot}`;
 }
 
-function bootstrapExistingKeys() {
+function loadExistingMatchKeys() {
   try {
-    if (!fs.existsSync(OUTPUT_PATH)) return;
-    const data = fs.readFileSync(OUTPUT_PATH, 'utf8');
-    const lines = data.split(/\r?\n/);
+    if (!fs.existsSync(CSV_OUTPUT_PATH)) return;
+    const fileContents = fs.readFileSync(CSV_OUTPUT_PATH, 'utf8');
+    const rows = fileContents.split(/\r?\n/);
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      if (!line.includes(',')) continue;
-      if (line.startsWith('HomeTeam,')) continue;
+    for (const row of rows) {
+      if (!row.trim()) continue;
+      if (!row.includes(',')) continue;
+      if (row.startsWith('HomeTeam,')) continue;
 
-      const parts = line.split(',');
-      if (parts.length < 7) continue;
+      const columns = row.split(',');
+      if (columns.length < 7) continue;
 
-      const homeTeam = stripQuotes(parts[0]);
-      const awayTeam = stripQuotes(parts[1]);
-      let dateTimeLocalValue = '';
-      let dateTimeUtcValue = '';
+      const homeTeam = stripSurroundingQuotes(columns[0]);
+      const awayTeam = stripSurroundingQuotes(columns[1]);
+      let localDateTimeValue = '';
+      let utcDateTimeValue = '';
       let sourceUrlValue = '';
 
-      if (parts.length >= 8) {
-        const matchDate = stripQuotes(parts[2]);
-        const matchTime = stripQuotes(parts[3]);
-        dateTimeLocalValue = [matchDate, matchTime].filter(Boolean).join(' ').trim();
-        dateTimeUtcValue = stripQuotes(parts[4]);
-        sourceUrlValue = stripQuotes(parts[7]);
+      if (columns.length >= 8) {
+        const matchDate = stripSurroundingQuotes(columns[2]);
+        const matchTime = stripSurroundingQuotes(columns[3]);
+        localDateTimeValue = [matchDate, matchTime].filter(Boolean).join(' ').trim();
+        utcDateTimeValue = stripSurroundingQuotes(columns[4]);
+        sourceUrlValue = stripSurroundingQuotes(columns[7]);
       } else {
-        dateTimeLocalValue = stripQuotes(parts[2]);
-        dateTimeUtcValue = stripQuotes(parts[3]);
-        sourceUrlValue = stripQuotes(parts[6]);
+        localDateTimeValue = stripSurroundingQuotes(columns[2]);
+        utcDateTimeValue = stripSurroundingQuotes(columns[3]);
+        sourceUrlValue = stripSurroundingQuotes(columns[6]);
       }
 
-      const key = buildMatchKeyFromValues(
+      const deduplicationKey = buildMatchKeyFromRawValues(
         homeTeam,
         awayTeam,
-        dateTimeLocalValue,
-        dateTimeUtcValue,
+        localDateTimeValue,
+        utcDateTimeValue,
         sourceUrlValue
       );
 
-      if (key) existingKeys.add(key);
+      if (deduplicationKey) existingMatchKeys.add(deduplicationKey);
     }
-  } catch (err) {
-    console.error('Failed to bootstrap CSV dedupe cache:', err);
+  } catch (error) {
+    console.error('Failed to bootstrap CSV dedupe cache:', error);
   }
 }
 
-function deriveLocalDateAndTime(match: MatchItem) {
+function getLocalizedDateAndTime(match: MatchItem) {
   const candidateIso = match.dateTimeLocal ?? match.dateTimeUtc;
   if (!candidateIso) return {} as { matchDate?: string; matchTime?: string };
 
-  let dt = DateTime.fromISO(candidateIso, { setZone: true });
-  if (!dt.isValid) {
-    dt = DateTime.fromISO(candidateIso, { zone: 'utc' });
+  let dateTimeCandidate = DateTime.fromISO(candidateIso, { setZone: true });
+  if (!dateTimeCandidate.isValid) {
+    dateTimeCandidate = DateTime.fromISO(candidateIso, { zone: 'utc' });
   }
-  if (!dt.isValid) return {} as { matchDate?: string; matchTime?: string };
+  if (!dateTimeCandidate.isValid) return {} as { matchDate?: string; matchTime?: string };
 
-  const local = dt.setZone('America/Sao_Paulo');
+  const localDateTime = dateTimeCandidate.setZone('America/Sao_Paulo');
   return {
-    matchDate: local.toFormat('dd/LL/yyyy'),
-    matchTime: local.toFormat('HH:mm')
+    matchDate: localDateTime.toFormat('dd/LL/yyyy'),
+    matchTime: localDateTime.toFormat('HH:mm')
   };
 }
 
-function formatWhereToWatch(list?: MatchItem['whereToWatch']) {
+function formatWatchProviders(list?: MatchItem['whereToWatch']) {
   if (!list?.length) return '';
-  const providers = list
+  
+  const providerNames = list
     .map(item => item?.provider?.trim())
     .filter((provider): provider is string => Boolean(provider));
-  if (!providers.length) return '';
-  const uniqueProviders = Array.from(new Set(providers));
+  if (!providerNames.length) return '';
+  const uniqueProviders = Array.from(new Set(providerNames));
   return uniqueProviders.join('|');
 }
 
-function formatMatchForCsv(match: MatchItem): CsvRecord {
-  const { matchDate = '', matchTime = '' } = deriveLocalDateAndTime(match);
+function mapMatchToCsvRecord(match: MatchItem): CsvRecord {
+  const { matchDate = '', matchTime = '' } = getLocalizedDateAndTime(match);
 
   return {
     homeTeam: match.homeTeam ?? '',
@@ -152,29 +153,29 @@ function formatMatchForCsv(match: MatchItem): CsvRecord {
     matchTime,
     dateTimeUtc: match.dateTimeUtc ?? '',
     competition: match.competition ?? '',
-    whereToWatch: formatWhereToWatch(match.whereToWatch),
+    whereToWatch: formatWatchProviders(match.whereToWatch),
     sourceUrl: match.sourceUrl
   };
 }
 
-bootstrapExistingKeys();
+loadExistingMatchKeys();
 
-export async function saveMatchesToCsv(matches: MatchItem[]) {
+export async function appendMatchesToCsv(matches: MatchItem[]) {
   if (!matches.length) return;
 
-  const uniqueMatches: MatchItem[] = [];
+  const matchesToAppend: MatchItem[] = [];
 
   for (const match of matches) {
-    const key = buildMatchKey(match);
-    if (!key) continue;
-    if (existingKeys.has(key)) continue;
-    existingKeys.add(key);
-    uniqueMatches.push(match);
+    const deduplicationKey = deriveMatchKey(match);
+    if (!deduplicationKey) continue;
+    if (existingMatchKeys.has(deduplicationKey)) continue;
+    existingMatchKeys.add(deduplicationKey);
+    matchesToAppend.push(match);
   }
 
-  if (!uniqueMatches.length) return;
+  if (!matchesToAppend.length) return;
 
-  const records = uniqueMatches.map(formatMatchForCsv);
+  const csvRecords = matchesToAppend.map(mapMatchToCsvRecord);
 
-  await csvWriter.writeRecords(records);
+  await csvWriter.writeRecords(csvRecords);
 }

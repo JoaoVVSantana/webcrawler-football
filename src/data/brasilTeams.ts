@@ -4,7 +4,7 @@ export interface Team {
   aliases: string[]; // ["Cuzeiro Esporte Clube","CruzeiroEC","CRU","Cabuloso"]
 }
 
-export const TEAMS: Team[] = [
+export const BRAZIL_TEAMS: Team[] = [
     { id: 'CRU', name: 'Cruzeiro', aliases: ['Cruzeiro', 'Cruzeiro Esporte Clube', 'CRU', 'Cabuloso', 'Raposa', 'Cruzeiro/MG'] },
     { id: 'FLA', name: 'Flamengo', aliases: ['Flamengo', 'CR Flamengo', 'FLA', 'Mengão', 'Mengo', 'Flamengo/RJ'] },
     { id: 'CAM', name: 'Atlético-MG', aliases: ['Atlético-MG', 'Atlético Mineiro', 'CAM', 'Galo', 'Galo Doido', 'Atlético/MG'] },
@@ -27,26 +27,26 @@ export const TEAMS: Team[] = [
     { id: 'MIR', name: 'Mirassol', aliases: ['Mirassol', 'Mirassol Futebol Clube', 'MIR', 'Leão da Alta Araraquarense', 'Leãozão'] }
 ];
 
-export function normalizeTeamName(raw: string): string | undefined 
+export function mapTeamNameToId(raw: string): string | undefined 
 {
-  const x = raw.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+  const normalizedLookup = raw.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
 
-  for (const t of TEAMS) 
+  for (const team of BRAZIL_TEAMS) 
   {
-    for (const a of [t.name, ...t.aliases]) 
+    for (const alias of [team.name, ...team.aliases]) 
     {
-      const y = a.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
-      if (x === y) return t.id;
+      const normalizedAlias = alias.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+      if (normalizedLookup === normalizedAlias) return team.id;
     }
   }
   // fallback
-  for (const t of TEAMS) 
+  for (const team of BRAZIL_TEAMS) 
   {
-    for (const a of [t.name, ...t.aliases]) 
+    for (const alias of [team.name, ...team.aliases]) 
     {
-      const y = a.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+      const normalizedAlias = alias.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
 
-      if (x.includes(y) || y.includes(x)) return t.id;
+      if (normalizedLookup.includes(normalizedAlias) || normalizedAlias.includes(normalizedLookup)) return team.id;
     }
   }
   return undefined;
