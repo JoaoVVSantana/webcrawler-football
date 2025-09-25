@@ -8,6 +8,7 @@ import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
 import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
 import { Adapter, CrawlTask } from './types';
 import { appendMatchesToCsv } from './pipelines/csvStore';
+import { saveMetrics } from './utils/metrics';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
@@ -19,9 +20,9 @@ function findAdapterForUrl(url: string): Adapter | undefined {
   return adapters.find(adapter => adapter.whitelistPatterns.some(pattern => pattern.test(normalizedUrl)));
 }
 
-async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier) {
+async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier): Promise<{ matches: number } | undefined> {
   const response = await fetchHtml(crawlerTask.url);
-  if (!response) return;
+  if (!response) return { matches: 0 };
 
   const html = response.body;
   const documentMetadata = createDocumentMetadata(crawlerTask.url, html);
@@ -37,7 +38,8 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
     if (matches.length) 
     {
       await persistMatches(matches);      
-      await appendMatchesToCsv(matches);    
+      await appendMatchesToCsv(matches);
+      return { matches: matches.length };
     }
 
     for (const link of nextLinks) 
@@ -60,6 +62,7 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   } else {
     const _links = extractUniqueLinks(crawlerTask.url, html);
   }
+  return { matches: 0 };
 }
 
 async function main() {
@@ -68,6 +71,7 @@ async function main() {
     process.exit(1);
   }
 
+  const startTime = new Date().toISOString();
   console.log({ seeds: CRAWLER_CONFIG.seeds }, 'Iniciando crawler');
   const frontier = new CrawlFrontier();
 
@@ -76,6 +80,9 @@ async function main() {
   }
 
   let processed = 0;
+  let matchesFound = 0;
+  let errorCount = 0;
+  const sourceBreakdown: Record<string, number> = {};
   const maxPagesToProcess = 200;
 
   while (frontier.size() > 0 && processed < maxPagesToProcess) 
@@ -83,17 +90,32 @@ async function main() {
     const task = frontier.pop()!;
     try 
     {
-      await processCrawlTask(task, frontier);
+      console.log({ processed: processed + 1, total: maxPagesToProcess, url: task.url }, 'Processando');
+      const result = await processCrawlTask(task, frontier);
+      if (result?.matches) matchesFound += result.matches;
+      const domain = new URL(task.url).hostname;
+      sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
 
     } 
     catch (e: any) 
     {
       console.log({ url: task.url, err: e?.message }, 'Falha task');
+      errorCount++;
     }
     processed++;
   }
 
-  console.log({ processed }, 'Crawler finalizado');
+  const endTime = new Date().toISOString();
+  console.log({ processed, matchesFound, errorCount }, 'Crawler finalizado');
+  
+  saveMetrics({
+    startTime,
+    endTime,
+    pagesProcessed: processed,
+    matchesFound,
+    errorCount,
+    sourceBreakdown
+  });
 }
 
 main().catch(err => {

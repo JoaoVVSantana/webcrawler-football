@@ -1,0 +1,11 @@
+{
+  "startTime": "2025-09-25T21:53:55.832Z",
+  "endTime": "2025-09-25T21:54:40.877Z",
+  "pagesProcessed": 42,
+  "matchesFound": 26,
+  "errorCount": 0,
+  "sourceBreakdown": {
+    "ge.globo.com": 41,
+    "www.espn.com.br": 1
+  }
+}
