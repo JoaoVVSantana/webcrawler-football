@@ -6,13 +6,15 @@ import { isHttpOrHttpsUrl } from './utils/url';
 import { persistDocumentMetadata, persistMatches } from './pipelines/store';
 import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
 import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
+import { CbfAdapter } from './adapters/cbfAdapter';
 import { Adapter, CrawlTask } from './types';
 import { appendMatchesToCsv } from './pipelines/csvStore';
 import { saveMetrics } from './utils/metrics';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
-  new EspnTeamAgendaAdapter()
+  new EspnTeamAgendaAdapter(),
+  new CbfAdapter()
 ];
 
 function findAdapterForUrl(url: string): Adapter | undefined {
@@ -83,7 +85,7 @@ async function main() {
   let matchesFound = 0;
   let errorCount = 0;
   const sourceBreakdown: Record<string, number> = {};
-  const maxPagesToProcess = 200;
+  const maxPagesToProcess = 3000;
 
   while (frontier.size() > 0 && processed < maxPagesToProcess) 
   {

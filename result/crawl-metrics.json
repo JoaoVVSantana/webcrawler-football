@@ -1,11 +1,12 @@
 {
-  "startTime": "2025-09-25T21:53:55.832Z",
-  "endTime": "2025-09-25T21:54:40.877Z",
-  "pagesProcessed": 42,
-  "matchesFound": 26,
+  "startTime": "2025-09-26T23:56:28.211Z",
+  "endTime": "2025-09-27T00:22:18.434Z",
+  "pagesProcessed": 1408,
+  "matchesFound": 18,
   "errorCount": 0,
   "sourceBreakdown": {
-    "ge.globo.com": 41,
+    "ge.globo.com": 21,
+    "www.cbf.com.br": 1386,
     "www.espn.com.br": 1
   }
 }
