@@ -10,10 +10,11 @@ import { CbfAdapter } from './adapters/cbfAdapter';
 import { UolOndeAssistirAdapter } from './adapters/uolOndeAssistir';
 import { LanceAgendaAdapter } from './adapters/lanceAgenda';
 import { OneFootballAdapter } from './adapters/oneFootball';
-import { Adapter, CrawlTask } from './types';
+import { Adapter, CrawlTask, PageType } from './types';
 import { appendMatchesToCsv } from './pipelines/csvStore';
 import { saveMetrics } from './utils/metrics';
 import { finalizeInvertedIndex } from './indexing/invertedIndex';
+import { isBlockedUrl } from './utils/urlFilters';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
@@ -24,12 +25,33 @@ const adapters: Adapter[] = [
   new OneFootballAdapter()
 ];
 
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
+const PAGE_PRIORITY_BOOST: Record<PageType, number> = {
+  agenda: 25,
+  'onde-assistir': 22,
+  tabela: 18,
+  match: 18,
+  team: 12,
+  noticia: 6,
+  outro: 0
+};
+
 function findAdapterForUrl(url: string): Adapter | undefined {
   const normalizedUrl = url.toLowerCase();
   return adapters.find(adapter => adapter.whitelistPatterns.some(pattern => pattern.test(normalizedUrl)));
 }
 
+function computeNextPriority(adapter: Adapter, url: string, parentPriority: number | undefined): number {
+  const pageType = adapter.classify(url);
+  const boost = PAGE_PRIORITY_BOOST[pageType] ?? 0;
+  const base = parentPriority ?? 0;
+  return base - 1 + boost;
+}
+
 async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier): Promise<{ matches: number } | undefined> {
+  if (isBlockedUrl(crawlerTask.url)) return { matches: 0 };
+
   const response = await fetchHtml(crawlerTask.url);
   if (!response) return { matches: 0 };
 
@@ -43,34 +65,53 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   if (selectedAdapter) {
 
     const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url);
-    //console.log({ url: task.url, found: matches.length }, 'EXTRACT');
-    if (matches.length) 
-    {
-      await persistMatches(matches);      
+    if (matches.length) {
+      await persistMatches(matches);
       await appendMatchesToCsv(matches);
-      return { matches: matches.length };
     }
 
-    for (const link of nextLinks) 
-    {
-      try 
-      {
-        const currentLink = new URL(link, crawlerTask.url).toString();
+    if (nextLinks.length) {
+      for (const link of nextLinks) {
+        try {
+          const currentLink = new URL(link, crawlerTask.url).toString();
+          if (isBlockedUrl(currentLink)) continue;
+          if (!isHttpOrHttpsUrl(currentLink)) continue;
+          if (!selectedAdapter.whitelistPatterns.some(pattern => pattern.test(currentLink))) continue;
+          if (frontier.has(currentLink)) continue;
 
-        if (!isHttpOrHttpsUrl(currentLink)) continue;
-
-        if (!selectedAdapter.whitelistPatterns.some(pattern => pattern.test(currentLink))) continue;
-
-        if (frontier.has(currentLink)) continue; // <-- evita duplicar
-
-        frontier.push({ url: currentLink, depth: (crawlerTask.depth ?? 0) + 1, priority: (crawlerTask.priority ?? 0) - 1 });
-      } 
-      catch { }
+          const nextPriority = computeNextPriority(selectedAdapter, currentLink, crawlerTask.priority);
+          frontier.push({
+            url: currentLink,
+            depth: (crawlerTask.depth ?? 0) + 1,
+            priority: nextPriority
+          });
+        } catch {
+          // ignore malformed URLs
+        }
+      }
     }
 
-  } else {
-    const _links = extractUniqueLinks(crawlerTask.url, html);
+    return { matches: matches.length };
   }
+
+  const fallbackLinks = extractUniqueLinks(crawlerTask.url, html).slice(0, 8);
+  if (fallbackLinks.length) {
+    for (const rawLink of fallbackLinks) {
+      try {
+        if (isBlockedUrl(rawLink)) continue;
+        if (!isHttpOrHttpsUrl(rawLink)) continue;
+        if (frontier.has(rawLink)) continue;
+        frontier.push({
+          url: rawLink,
+          depth: (crawlerTask.depth ?? 0) + 1,
+          priority: (crawlerTask.priority ?? 0) - 2
+        });
+      } catch {
+        // ignore malformed URLs
+      }
+    }
+  }
+
   return { matches: 0 };
 }
 
@@ -88,41 +129,80 @@ async function main() {
     frontier.push({ url: seed, depth: 0, priority: 100 });
   }
 
-  let processed = 0;
-  let matchesFound = 0;
-  let errorCount = 0;
+  const statistics = {
+    processed: 0,
+    matchesFound: 0,
+    errorCount: 0
+  };
   const sourceBreakdown: Record<string, number> = {};
-  const maxPagesToProcess = 3000;
+  const maxPagesToProcess = Number(process.env.MAX_PAGES ?? 60000);
+  const concurrency = Math.max(1, CRAWLER_CONFIG.globalMaxConcurrency);
+  let stopRequested = false;
+  let activeFetches = 0;
 
-  while (frontier.size() > 0 && processed < maxPagesToProcess) 
-  {
-    const task = frontier.pop()!;
-    try 
-    {
-      console.log({ processed: processed + 1, total: maxPagesToProcess, url: task.url }, 'Processando');
-      const result = await processCrawlTask(task, frontier);
-      if (result?.matches) matchesFound += result.matches;
-      const domain = new URL(task.url).hostname;
-      sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
+  async function worker(workerId: number) {
+    while (true) {
+      if (stopRequested) break;
+      if (statistics.processed >= maxPagesToProcess) {
+        stopRequested = true;
+        break;
+      }
 
-    } 
-    catch (e: any) 
-    {
-      console.log({ url: task.url, err: e?.message }, 'Falha task');
-      errorCount++;
+      const task = frontier.pop();
+      if (!task) {
+        if (stopRequested) break;
+        if (activeFetches === 0 && frontier.size() === 0) break;
+        await sleep(25);
+        continue;
+      }
+
+      activeFetches++;
+      try {
+        console.log(
+          {
+            worker: workerId,
+            processed: statistics.processed + 1,
+            target: maxPagesToProcess,
+            url: task.url
+          },
+          'Processando'
+        );
+
+        const result = await processCrawlTask(task, frontier);
+        if (result?.matches) statistics.matchesFound += result.matches;
+        const domain = new URL(task.url).hostname;
+        sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
+      } catch (e: any) {
+        console.log({ worker: workerId, url: task.url, err: e?.message }, 'Falha task');
+        statistics.errorCount++;
+      } finally {
+        activeFetches--;
+        statistics.processed++;
+        if (statistics.processed >= maxPagesToProcess) stopRequested = true;
+      }
     }
-    processed++;
   }
 
+  const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
+  await Promise.all(workers);
+
   const endTime = new Date().toISOString();
-  console.log({ processed, matchesFound, errorCount }, 'Crawler finalizado');
+  console.log(
+    {
+      processed: statistics.processed,
+      matchesFound: statistics.matchesFound,
+      errorCount: statistics.errorCount,
+      visited: frontier.visitedCount()
+    },
+    'Crawler finalizado'
+  );
   
   saveMetrics({
     startTime,
     endTime,
-    pagesProcessed: processed,
-    matchesFound,
-    errorCount,
+    pagesProcessed: statistics.processed,
+    matchesFound: statistics.matchesFound,
+    errorCount: statistics.errorCount,
     sourceBreakdown
   });
   finalizeInvertedIndex();

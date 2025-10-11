@@ -21,8 +21,15 @@ if (process.env.SEEDS_FILE)
 
     const clubSeedGroups = Object.values(seedConfig.clubs ?? {}) as string[][];
     const portalSeedGroups = Object.values(seedConfig.portals ?? {}) as string[][];
+    const independentSeedGroups = Object.values(seedConfig.independent_media ?? {}) as string[][];
+    const supporterSeedGroups = Object.values(seedConfig.supporters ?? {}) as string[][];
 
-    seedUrls = clubSeedGroups.flat().concat(portalSeedGroups.flat());
+    seedUrls = [
+      ...portalSeedGroups.flat(),
+      ...clubSeedGroups.flat(),
+      ...independentSeedGroups.flat(),
+      ...supporterSeedGroups.flat()
+    ];
   } 
   catch (error) 
   {

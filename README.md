@@ -255,6 +255,15 @@ O crawler agora realiza limpeza lexical de cada documento capturado antes de arm
 - `result/index/index-metadata.json` registra tempo total de indexação, tamanho do arquivo, vocabulário por chunk e snapshot de uso de memória.
 - O pipeline roda automaticamente via `persistDocumentMetadata` e é finalizado tanto no término normal quanto em casos de erro fatal.
 
+## Performance e Escala
+
+- O frontier agora usa fila priorizada (agenda > onde assistir > tabela > demais) e evita revisitar URLs normalizadas.
+- O loop principal foi paralelizado com `GLOBAL_MAX_CONCURRENCY` (default 6) respeitando limites por domínio via Bottleneck; ajustar no `.env` conforme necessário.
+- Defina `MAX_PAGES` para controlar o orçamento máximo de páginas por execução (padrão `60000`).
+- Links de follow dos adaptadores são sempre empilhados (mesmo quando já extraímos algum match) e páginas sem adaptador empurram um subconjunto de links de fallback para ampliar a cobertura.
+- Métricas de execução em `result/crawl-metrics.json` permitem monitorar throughput e recalibrar seeds/limites.
+- Filtro embutido de hosts conhecidos por propaganda/ads (Taboola, Outbrain, DoubleClick, casas de aposta, etc.) evita gastar orçamento de páginas com conteúdo irrelevante.
+
 ## Adaptadores Disponíveis
 
 - `GeTeamAgendaAdapter`: agendas e rodadas do ge.globo.
@@ -270,9 +279,11 @@ Todos os adaptadores compartilham deduplicação de partidas, normalização de 
 
 `seeds/serieA_2025.json` foi expandido com novos portais e hubs de clubes:
 
-- Portais: CBF, GE, ESPN, UOL, Lance e OneFootball (competição/rodadas).
+- Portais: CBF, GE, ESPN, UOL, Lance, OneFootball, Goal, Torcedores, Gazeta Esportiva e Terra.
 - Clubes (GE): cobertura para toda a Série A + times promovidos (Cuiabá, Juventude, Mirassol, etc.).
 - Clubes (UOL/Lance): páginas principais de clubes tradicionais para ampliar profundidade de coleta.
+- Mídias independentes: blogs (Trivela, Placar, Futebol na Veia, etc.), portais analíticos (SofaScore, Flashscore, FootyStats) e newsletters/podcasts (Última Divisão, Jogada de Efeito).
+- Torcidas: páginas oficiais e sites de torcida para Flamengo, Corinthians, Palmeiras, São Paulo, Vasco, Botafogo, Cruzeiro, Grêmio e Internacional.
 
 O `config.ts` continua aceitando `SEEDS` via `.env`, mas ler o arquivo atualizado garante maior diversidade de fontes com potencial de superar o target de 50k páginas coletadas.
 ## TODO de Melhorias
