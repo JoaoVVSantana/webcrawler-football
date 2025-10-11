@@ -260,7 +260,10 @@ O crawler agora realiza limpeza lexical de cada documento capturado antes de arm
 - O frontier agora usa fila priorizada (agenda > onde assistir > tabela > demais) e evita revisitar URLs normalizadas.
 - O loop principal foi paralelizado com `GLOBAL_MAX_CONCURRENCY` (default 6) respeitando limites por domínio via Bottleneck; ajustar no `.env` conforme necessário.
 - Defina `MAX_PAGES` para controlar o orçamento máximo de páginas por execução (padrão `60000`).
+- `MAX_RUNTIME_MINUTES` finaliza o crawler automaticamente após a janela desejada e `FRONTIER_RESUME=true` mantém o progresso entre execuções (snapshot em `result/frontier-state.json`, intervalo ajustável por `FRONTIER_SNAPSHOT_INTERVAL_MS`).
+- Seeds são carregadas automaticamente de todos os arquivos `.json` em `seeds/`, permitindo ciclos longos com diferentes conjuntos (portais, torcidas, analytics, etc.).
 - Links de follow dos adaptadores são sempre empilhados (mesmo quando já extraímos algum match) e páginas sem adaptador empurram um subconjunto de links de fallback para ampliar a cobertura.
+- `FALLBACK_LINK_LIMIT` define quantos links genéricos por página entram na fila (default 18), equilibrando profundidade e velocidade.
 - Métricas de execução em `result/crawl-metrics.json` permitem monitorar throughput e recalibrar seeds/limites.
 - Filtro embutido de hosts conhecidos por propaganda/ads (Taboola, Outbrain, DoubleClick, casas de aposta, etc.) evita gastar orçamento de páginas com conteúdo irrelevante.
 
@@ -272,6 +275,7 @@ O crawler agora realiza limpeza lexical de cada documento capturado antes de arm
 - `UolOndeAssistirAdapter`: páginas de agenda/onde assistir do UOL.
 - `LanceAgendaAdapter`: agenda, inline state e páginas de clubes do Lance.
 - `OneFootballAdapter`: dados estruturados (Next.js) e JSON-LD do OneFootball.
+- `GenericSportsNewsAdapter`: fallback inteligente para blogs/portais de torcida/mídia independente (Trivela, Placar, Goal, Torcedores, etc.), garantindo descoberta profunda de links mesmo quando não há fixture explícito.
 
 Todos os adaptadores compartilham deduplicação de partidas, normalização de nomes de times e heurísticas de broadcast (TV aberta, fechada, streaming e YouTube).
 
@@ -285,7 +289,7 @@ Todos os adaptadores compartilham deduplicação de partidas, normalização de 
 - Mídias independentes: blogs (Trivela, Placar, Futebol na Veia, etc.), portais analíticos (SofaScore, Flashscore, FootyStats) e newsletters/podcasts (Última Divisão, Jogada de Efeito).
 - Torcidas: páginas oficiais e sites de torcida para Flamengo, Corinthians, Palmeiras, São Paulo, Vasco, Botafogo, Cruzeiro, Grêmio e Internacional.
 
-O `config.ts` continua aceitando `SEEDS` via `.env`, mas ler o arquivo atualizado garante maior diversidade de fontes com potencial de superar o target de 50k páginas coletadas.
+O `config.ts` continua aceitando `SEEDS` via `.env`, mas agora também agrega automaticamente todos os arquivos `.json` encontrados em `seeds/`, garantindo diversidade contínua de fontes e ampliando as chances de ultrapassar 50k páginas coletadas.
 ## TODO de Melhorias
 
 - Consolidar a persistência de documentos e partidas em PostgreSQL e Elasticsearch, substituindo os stubs em src/pipelines/store.ts e aplicando deduplicação no banco.

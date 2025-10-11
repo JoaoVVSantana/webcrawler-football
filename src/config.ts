@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import fs from 'fs';
+import path from 'path';
 
 function parseNumberList(input: string | undefined, fallback: number[]): number[] {
   if (!input) return fallback;
@@ -10,36 +11,56 @@ function parseNumberList(input: string | undefined, fallback: number[]): number[
   return values.length ? Array.from(new Set(values)) : fallback;
 }
 
+function extractSeedsFromConfig(seedConfig: unknown): string[] {
+  if (!seedConfig || typeof seedConfig !== 'object') return [];
+  const collected: string[] = [];
+
+  for (const value of Object.values(seedConfig as Record<string, unknown>)) {
+    if (Array.isArray(value)) {
+      collected.push(
+        ...value
+          .map(item => (typeof item === 'string' ? item.trim() : ''))
+          .filter(Boolean)
+      );
+    } else if (value && typeof value === 'object') {
+      collected.push(...extractSeedsFromConfig(value));
+    }
+  }
+
+  return collected;
+}
+
 let seedUrls: string[] = [];
 
-if (process.env.SEEDS_FILE) 
-{
-  try
-  {
+if (process.env.SEEDS_FILE) {
+  try {
     const seedFileContents = fs.readFileSync(process.env.SEEDS_FILE, 'utf8');
     const seedConfig = JSON.parse(seedFileContents);
-
-    const clubSeedGroups = Object.values(seedConfig.clubs ?? {}) as string[][];
-    const portalSeedGroups = Object.values(seedConfig.portals ?? {}) as string[][];
-    const independentSeedGroups = Object.values(seedConfig.independent_media ?? {}) as string[][];
-    const supporterSeedGroups = Object.values(seedConfig.supporters ?? {}) as string[][];
-
-    seedUrls = [
-      ...portalSeedGroups.flat(),
-      ...clubSeedGroups.flat(),
-      ...independentSeedGroups.flat(),
-      ...supporterSeedGroups.flat()
-    ];
-  } 
-  catch (error) 
-  {
+    seedUrls = extractSeedsFromConfig(seedConfig);
+  } catch (error) {
     console.error('Erro ao ler SEEDS_FILE:', error);
   }
-} 
-else if (process.env.SEEDS) 
-{
+} else if (process.env.SEEDS) {
   seedUrls = process.env.SEEDS.split(',').map(seed => seed.trim()).filter(Boolean);
+} else {
+  const seedsDir = path.join(process.cwd(), 'seeds');
+  if (fs.existsSync(seedsDir)) {
+    const candidateFiles = fs.readdirSync(seedsDir).filter(file => file.endsWith('.json'));
+    for (const file of candidateFiles) {
+      try {
+        const fileContents = fs.readFileSync(path.join(seedsDir, file), 'utf8');
+        const parsedConfig = JSON.parse(fileContents);
+        seedUrls.push(...extractSeedsFromConfig(parsedConfig));
+      } catch (error) {
+        console.error(`Erro ao carregar seeds de ${file}:`, error);
+      }
+    }
+  }
 }
+
+seedUrls = Array.from(new Set(seedUrls.filter(Boolean)));
+
+const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 240]);
 
 export const CRAWLER_CONFIG = {
   globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 6),
@@ -50,15 +71,20 @@ export const CRAWLER_CONFIG = {
   userAgentHeader: process.env.CRAWLER_USER_AGENT ?? 'CrawlerBrasileirao/0.1',
   acceptHeader: 'text/html,application/xhtml+xml',
   languageHeader: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+  resumeFrontier: (process.env.FRONTIER_RESUME ?? 'true').toLowerCase() === 'true',
+  frontierSnapshotPath:
+    process.env.FRONTIER_SNAPSHOT_PATH ?? path.join(process.cwd(), 'result', 'frontier-state.json'),
+  frontierSnapshotIntervalMs: Number(process.env.FRONTIER_SNAPSHOT_INTERVAL_MS ?? 60000),
+  maxRuntimeMs: Number(process.env.MAX_RUNTIME_MINUTES ?? 0) * 60_000,
+  fallbackLinkLimit: Number(process.env.FALLBACK_LINK_LIMIT ?? 18),
+  index: {
+    chunkSizes: defaultChunkSizes,
+    primaryChunkSize: defaultChunkSizes[0],
+    minTokenLength: Math.max(2, Number(process.env.INDEX_MIN_TOKEN_LENGTH ?? 3)),
+    topTermsLimit: Math.max(5, Number(process.env.LEXICAL_TOP_TERMS ?? 12)),
+    maxTokensPerDocument: Number(process.env.INDEX_MAX_TOKENS ?? 25000),
+    granularity: (process.env.INDEX_GRANULARITY ?? 'token').toLowerCase()
+  }
 };
 
-const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 240]);
-
-export const INDEX_CONFIG = {
-  chunkSizes: defaultChunkSizes,
-  primaryChunkSize: defaultChunkSizes[0],
-  minTokenLength: Math.max(2, Number(process.env.INDEX_MIN_TOKEN_LENGTH ?? 3)),
-  topTermsLimit: Math.max(5, Number(process.env.LEXICAL_TOP_TERMS ?? 12)),
-  maxTokensPerDocument: Number(process.env.INDEX_MAX_TOKENS ?? 25000),
-  granularity: (process.env.INDEX_GRANULARITY ?? 'token').toLowerCase()
-};
+export const INDEX_CONFIG = CRAWLER_CONFIG.index;

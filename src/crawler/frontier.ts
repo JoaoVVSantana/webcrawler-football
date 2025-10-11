@@ -6,6 +6,11 @@ function resolvePriority(task: CrawlTask): number {
   return task.priority ?? 0;
 }
 
+export interface FrontierSerializedState {
+  queue: CrawlTask[];
+  visited: string[];
+}
+
 export class CrawlFrontier {
   private readonly maxDepth = Number(process.env.MAX_DEPTH ?? 3);
   private queue: CrawlTask[] = [];
@@ -43,6 +48,38 @@ export class CrawlFrontier {
   has(url: string): boolean {
     const normalizedUrl = canonicalizeUrl(url);
     return this.queuedUrls.has(normalizedUrl) || this.visitedUrls.has(normalizedUrl);
+  }
+
+  serialize(): FrontierSerializedState {
+    return {
+      queue: this.queue.map(task => ({ ...task })),
+      visited: Array.from(this.visitedUrls)
+    };
+  }
+
+  restore(state: FrontierSerializedState): void {
+    const restoredQueue: CrawlTask[] = [];
+    const restoredQueued = new Set<string>();
+
+    for (const task of state.queue ?? []) {
+      if (!task?.url) continue;
+      const normalizedUrl = canonicalizeUrl(task.url);
+      if (isBlockedUrl(normalizedUrl)) continue;
+      restoredQueue.push({ ...task, url: normalizedUrl });
+      restoredQueued.add(normalizedUrl);
+    }
+
+    this.queue = restoredQueue;
+    this.queuedUrls = restoredQueued;
+    this.visitedUrls = new Set(
+      (state.visited ?? []).map(url => canonicalizeUrl(url)).filter(url => !isBlockedUrl(url))
+    );
+  }
+
+  clear(): void {
+    this.queue = [];
+    this.queuedUrls.clear();
+    this.visitedUrls.clear();
   }
 
   private enqueue(task: CrawlTask): void {

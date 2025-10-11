@@ -10,11 +10,13 @@ import { CbfAdapter } from './adapters/cbfAdapter';
 import { UolOndeAssistirAdapter } from './adapters/uolOndeAssistir';
 import { LanceAgendaAdapter } from './adapters/lanceAgenda';
 import { OneFootballAdapter } from './adapters/oneFootball';
+import { GenericSportsNewsAdapter } from './adapters/genericSportsNews';
 import { Adapter, CrawlTask, PageType } from './types';
 import { appendMatchesToCsv } from './pipelines/csvStore';
 import { saveMetrics } from './utils/metrics';
 import { finalizeInvertedIndex } from './indexing/invertedIndex';
 import { isBlockedUrl } from './utils/urlFilters';
+import { loadFrontierSnapshot, saveFrontierSnapshot } from './crawler/stateStore';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
@@ -22,10 +24,12 @@ const adapters: Adapter[] = [
   new CbfAdapter(),
   new UolOndeAssistirAdapter(),
   new LanceAgendaAdapter(),
-  new OneFootballAdapter()
+  new OneFootballAdapter(),
+  new GenericSportsNewsAdapter()
 ];
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+const FALLBACK_LINK_LIMIT = Math.max(0, CRAWLER_CONFIG.fallbackLinkLimit ?? 0);
 
 const PAGE_PRIORITY_BOOST: Record<PageType, number> = {
   agenda: 25,
@@ -94,12 +98,12 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
     return { matches: matches.length };
   }
 
-  const fallbackLinks = extractUniqueLinks(crawlerTask.url, html).slice(0, 8);
-  if (fallbackLinks.length) {
-    for (const rawLink of fallbackLinks) {
+  if (FALLBACK_LINK_LIMIT > 0) {
+    const fallbackLinks = extractUniqueLinks(crawlerTask.url, html)
+      .filter(link => isHttpOrHttpsUrl(link) && !isBlockedUrl(link));
+
+    for (const rawLink of fallbackLinks.slice(0, FALLBACK_LINK_LIMIT)) {
       try {
-        if (isBlockedUrl(rawLink)) continue;
-        if (!isHttpOrHttpsUrl(rawLink)) continue;
         if (frontier.has(rawLink)) continue;
         frontier.push({
           url: rawLink,
@@ -122,11 +126,49 @@ async function main() {
   }
 
   const startTime = new Date().toISOString();
+  const startTimestamp = Date.now();
   console.log({ seeds: CRAWLER_CONFIG.seeds }, 'Iniciando crawler');
   const frontier = new CrawlFrontier();
 
+  const snapshotPath = CRAWLER_CONFIG.frontierSnapshotPath;
+  const snapshotInterval = Math.max(0, CRAWLER_CONFIG.frontierSnapshotIntervalMs ?? 0);
+  let lastSnapshotAt = Date.now();
+  let isSavingSnapshot = false;
+
+  if (CRAWLER_CONFIG.resumeFrontier) {
+    const snapshot = loadFrontierSnapshot(snapshotPath);
+    if (snapshot) {
+      frontier.restore({ queue: snapshot.queue, visited: snapshot.visited });
+      console.log(
+        { restoredQueue: frontier.size(), restoredVisited: frontier.visitedCount() },
+        'Frontier restaurada de snapshot'
+      );
+    }
+  }
+
   for (const seed of CRAWLER_CONFIG.seeds) {
     frontier.push({ url: seed, depth: 0, priority: 100 });
+  }
+
+  async function maybeSnapshot(force = false) {
+    if (!CRAWLER_CONFIG.resumeFrontier) return;
+    if (!snapshotPath) return;
+    const now = Date.now();
+    if (!force && snapshotInterval <= 0) return;
+    if (!force && snapshotInterval > 0 && now - lastSnapshotAt < snapshotInterval) return;
+    if (isSavingSnapshot) return;
+    isSavingSnapshot = true;
+    try {
+      const state = frontier.serialize();
+      await saveFrontierSnapshot(snapshotPath, {
+        queue: state.queue,
+        visited: state.visited,
+        createdAt: new Date().toISOString()
+      });
+      lastSnapshotAt = now;
+    } finally {
+      isSavingSnapshot = false;
+    }
   }
 
   const statistics = {
@@ -138,20 +180,31 @@ async function main() {
   const maxPagesToProcess = Number(process.env.MAX_PAGES ?? 60000);
   const concurrency = Math.max(1, CRAWLER_CONFIG.globalMaxConcurrency);
   let stopRequested = false;
+  let stopReason: string | null = null;
   let activeFetches = 0;
 
   async function worker(workerId: number) {
     while (true) {
       if (stopRequested) break;
+      if (CRAWLER_CONFIG.maxRuntimeMs > 0 && Date.now() - startTimestamp >= CRAWLER_CONFIG.maxRuntimeMs) {
+        stopRequested = true;
+        stopReason = stopReason ?? 'runtime_limit';
+        break;
+      }
       if (statistics.processed >= maxPagesToProcess) {
         stopRequested = true;
+        stopReason = stopReason ?? 'max_pages';
         break;
       }
 
       const task = frontier.pop();
       if (!task) {
         if (stopRequested) break;
-        if (activeFetches === 0 && frontier.size() === 0) break;
+        if (activeFetches === 0 && frontier.size() === 0) {
+          stopRequested = true;
+          stopReason = stopReason ?? 'frontier_empty';
+          break;
+        }
         await sleep(25);
         continue;
       }
@@ -178,13 +231,18 @@ async function main() {
       } finally {
         activeFetches--;
         statistics.processed++;
-        if (statistics.processed >= maxPagesToProcess) stopRequested = true;
+        if (statistics.processed >= maxPagesToProcess) {
+          stopRequested = true;
+          stopReason = stopReason ?? 'max_pages';
+        }
+        await maybeSnapshot(false);
       }
     }
   }
 
   const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
   await Promise.all(workers);
+  await maybeSnapshot(true);
 
   const endTime = new Date().toISOString();
   console.log(
@@ -192,7 +250,8 @@ async function main() {
       processed: statistics.processed,
       matchesFound: statistics.matchesFound,
       errorCount: statistics.errorCount,
-      visited: frontier.visitedCount()
+      visited: frontier.visitedCount(),
+      stopReason
     },
     'Crawler finalizado'
   );
@@ -203,7 +262,8 @@ async function main() {
     pagesProcessed: statistics.processed,
     matchesFound: statistics.matchesFound,
     errorCount: statistics.errorCount,
-    sourceBreakdown
+    sourceBreakdown,
+    stopReason: stopReason ?? undefined
   });
   finalizeInvertedIndex();
 }

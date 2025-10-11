@@ -8,6 +8,7 @@ interface CrawlMetrics {
   matchesFound: number;
   errorCount: number;
   sourceBreakdown: Record<string, number>;
+  stopReason?: string;
 }
 
 const metricsFile = path.join(process.cwd(), 'result', 'crawl-metrics.json');

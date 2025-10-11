@@ -99,7 +99,6 @@ export async function fetchHtml(url: string): Promise<Response<string> | null> {
         throwHttpErrors: false,
         followRedirect: true
       });
-
       const responseByteLength = (response.rawBody as any)?.length ?? 0;
       //console.log({ status: res.statusCode, bytes: responseByteLength }, 'RESP');
 
@@ -112,7 +111,6 @@ export async function fetchHtml(url: string): Promise<Response<string> | null> {
         //console.log({ url }, 'Descartado (soft-404 detectado)');
         return null;
       }
-
       return response;
 
     } 
