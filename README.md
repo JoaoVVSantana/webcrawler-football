@@ -231,6 +231,50 @@ Amostra de 50–200 páginas coletadas com logs (para demonstrar politeness e ex
 Dataset inicial de partidas futuras (JSON/CSV) com team_home, team_away, datetime_local, where_to_watch, link.
 
 Métricas iniciais: páginas coletadas por fonte, taxa de extração com sucesso, exemplos de conflitos resolvidos.
+
+## Pipeline de Processamento de Texto e Indexação
+
+O crawler agora realiza limpeza lexical de cada documento capturado antes de armazenar os metadados:
+
+- Normalização do texto (remoção de HTML, trims, minúsculas, remoção de acentos e de tokens fora do alfabeto).
+- Tokenização, remoção de stopwords (lista PT-BR personalizada) e stemming com `natural.PorterStemmerPt`.
+- Estatísticas por documento (total de tokens, densidade lexical, termos mais frequentes, tempo de processamento) salvas em `result/documents.jsonl`.
+
+### Configuração
+
+- `INDEX_CHUNK_SIZES`: tamanhos de chunk para análise/índice invertido (ex.: `160,240`). Usa 160 tokens por padrão (e avalia múltiplos buckets).
+- `INDEX_MIN_TOKEN_LENGTH`: comprimento mínimo do token (default `3`).
+- `INDEX_MAX_TOKENS`: número máximo de tokens por documento antes de truncar (default `25000`).
+- `LEXICAL_TOP_TERMS`: quantidade de termos relevantes registrados por documento (default `12`).
+- `INDEX_GRANULARITY`: apenas informativo para expor a granularidade utilizada (default `token`).
+
+### Índice Invertido e Métricas
+
+- Construção incremental em memória durante a coleta e flush ao final em `result/index/inverted-index.json`.
+- Para cada chunk size configurado são armazenados vocabulário, postings (docId, chunkId, tf) e estatísticas de cobertura.
+- `result/index/index-metadata.json` registra tempo total de indexação, tamanho do arquivo, vocabulário por chunk e snapshot de uso de memória.
+- O pipeline roda automaticamente via `persistDocumentMetadata` e é finalizado tanto no término normal quanto em casos de erro fatal.
+
+## Adaptadores Disponíveis
+
+- `GeTeamAgendaAdapter`: agendas e rodadas do ge.globo.
+- `EspnTeamAgendaAdapter`: competições e JSON-LD da ESPN.
+- `CbfAdapter`: tabelas, histórico, atletas e estatísticas do site da CBF.
+- `UolOndeAssistirAdapter`: páginas de agenda/onde assistir do UOL.
+- `LanceAgendaAdapter`: agenda, inline state e páginas de clubes do Lance.
+- `OneFootballAdapter`: dados estruturados (Next.js) e JSON-LD do OneFootball.
+
+Todos os adaptadores compartilham deduplicação de partidas, normalização de nomes de times e heurísticas de broadcast (TV aberta, fechada, streaming e YouTube).
+
+## Seeds Atualizadas
+
+`seeds/serieA_2025.json` foi expandido com novos portais e hubs de clubes:
+
+- Portais: CBF, GE, ESPN, UOL, Lance e OneFootball (competição/rodadas).
+- Clubes (GE): cobertura para toda a Série A + times promovidos (Cuiabá, Juventude, Mirassol, etc.).
+- Clubes (UOL/Lance): páginas principais de clubes tradicionais para ampliar profundidade de coleta.
+
+O `config.ts` continua aceitando `SEEDS` via `.env`, mas ler o arquivo atualizado garante maior diversidade de fontes com potencial de superar o target de 50k páginas coletadas.
 ## TODO de Melhorias
 
 - Consolidar a persistência de documentos e partidas em PostgreSQL e Elasticsearch, substituindo os stubs em src/pipelines/store.ts e aplicando deduplicação no banco.

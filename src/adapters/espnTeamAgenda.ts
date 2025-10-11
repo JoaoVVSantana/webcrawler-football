@@ -15,7 +15,7 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
   }
 
   extract(html: string, url: string) {
-    const jsonLdMatches = this.parseMatchesFromJsonLd(html, url);
+    const jsonLdMatches = this.extractSportsEventsFromJsonLd(html, url, 'ESPN (json-ld)', 0.8);
     const dom = cheerio.load(html);
     const htmlMatches = jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
     const allowedLinks = this.collectAllowedLinks(dom, url);
@@ -23,47 +23,14 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
     return { matches, nextLinks: allowedLinks };
   }
 
-  private parseMatchesFromJsonLd(html: string, sourceUrl: string): MatchItem[] {
-    const matches: MatchItem[] = [];
-    const scriptBlocks = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) ?? [];
-    for (const scriptBlock of scriptBlocks) {
-      try {
-        const jsonContent = scriptBlock.replace(/^[\s\S]*?>/, '').replace(/<\/script>\s*$/i, '');
-        const parsedData = JSON.parse(jsonContent);
-        const dataEntries = Array.isArray(parsedData) ? parsedData : [parsedData];
-        for (const entry of dataEntries) {
-          if (entry?.['@type'] === 'SportsEvent') {
-            const homeName = this.standardizeTeamName(entry?.homeTeam?.name ?? entry?.homeTeam);
-            const awayName = this.standardizeTeamName(entry?.awayTeam?.name ?? entry?.awayTeam);
-            const competitionName = entry?.superEvent?.name ?? entry?.competitor?.name ?? undefined;
-            const startIso = entry?.startDate ? String(entry.startDate) : undefined;
-            if (homeName && awayName && startIso) {
-              matches.push({
-                homeTeam: homeName,
-                awayTeam: awayName,
-                competition: competitionName,
-                dateTimeUtc: startIso,
-                sourceUrl,
-                sourceName: 'ESPN (competição)',
-                confidence: 0.8
-              });
-            }
-          }
-        }
-      } catch {}
-    }
-    return this.deduplicateMatches(matches);
-  }
-
   private parseMatchesFromHtml(dom: cheerio.CheerioAPI, sourceUrl: string): MatchItem[] {
     const matches: MatchItem[] = [];
 
-    dom('article, li, [class*=match], [class*=game]').each((_, element) => 
-    {
+    dom('article, li, [class*=match], [class*=game]').each((_, element) => {
       const text = dom(element).text().replace(/\s+/g, ' ').trim();
       if (!text || !/[xX]/.test(text)) return;
 
-      const teamsMatch = text.match(/([A-Za-zÀ-ÿ\.\s'\-]{3,})\s+[xX]\s+([A-Za-zÀ-ÿ\.\s'\-]{3,})/);
+      const teamsMatch = text.match(/([A-Za-z\.\s'\-]{3,})\s+[xX]\s+([A-Za-z\.\s'\-]{3,})/);
       if (!teamsMatch) return;
 
       const homeTeamName = teamsMatch[1];
@@ -71,7 +38,7 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
 
       const dateMatch =
         text.match(/(\d{1,2}\/\d{1,2}(?:\/\d{4})?)/) ||
-        text.match(/(\d{1,2}\s+de\s+[A-Za-zÀ-ÿ]+)/i);
+        text.match(/(\d{1,2}\s+de\s+[A-Za-z]+)/i);
       const timeMatch = text.match(/(\d{1,2}:\d{2})/);
       const dateTimeText = dateMatch && timeMatch ? `${dateMatch[0]} ${timeMatch[0]}` : undefined;
 
@@ -84,7 +51,7 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
         dateTimeLocal: local,
         dateTimeUtc: utc,
         sourceUrl,
-        sourceName: 'ESPN (competição)',
+        sourceName: 'ESPN (competicao)',
         confidence: 0.5
       });
     });

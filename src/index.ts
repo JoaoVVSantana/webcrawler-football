@@ -7,14 +7,21 @@ import { persistDocumentMetadata, persistMatches } from './pipelines/store';
 import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
 import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
 import { CbfAdapter } from './adapters/cbfAdapter';
+import { UolOndeAssistirAdapter } from './adapters/uolOndeAssistir';
+import { LanceAgendaAdapter } from './adapters/lanceAgenda';
+import { OneFootballAdapter } from './adapters/oneFootball';
 import { Adapter, CrawlTask } from './types';
 import { appendMatchesToCsv } from './pipelines/csvStore';
 import { saveMetrics } from './utils/metrics';
+import { finalizeInvertedIndex } from './indexing/invertedIndex';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
   new EspnTeamAgendaAdapter(),
-  new CbfAdapter()
+  new CbfAdapter(),
+  new UolOndeAssistirAdapter(),
+  new LanceAgendaAdapter(),
+  new OneFootballAdapter()
 ];
 
 function findAdapterForUrl(url: string): Adapter | undefined {
@@ -27,10 +34,10 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   if (!response) return { matches: 0 };
 
   const html = response.body;
-  const documentMetadata = createDocumentMetadata(crawlerTask.url, html);
-  documentMetadata.status = response.statusCode;
+  const documentRecord = createDocumentMetadata(crawlerTask.url, html);
+  documentRecord.metadata.status = response.statusCode;
 
-  await persistDocumentMetadata(documentMetadata);
+  await persistDocumentMetadata(documentRecord);
 
   const selectedAdapter = findAdapterForUrl(crawlerTask.url);
   if (selectedAdapter) {
@@ -118,10 +125,12 @@ async function main() {
     errorCount,
     sourceBreakdown
   });
+  finalizeInvertedIndex();
 }
 
 main().catch(err => {
   console.log({ err }, 'Erro fatal');
+  finalizeInvertedIndex();
   process.exit(1);
 });
 

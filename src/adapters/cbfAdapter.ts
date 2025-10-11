@@ -17,9 +17,9 @@ export class CbfAdapter extends BaseAdapter {
   classify(url: string): PageType {
     if (/\/tabelas\//i.test(url)) return 'agenda';
     if (/\/times\//i.test(url)) return 'team';
-    if (/\/atletas\//i.test(url)) return 'other';
+    if (/\/atletas\//i.test(url)) return 'outro';
     if (/\/jogos\//i.test(url)) return 'match';
-    return 'other';
+    return 'outro';
   }
 
   extract(html: string, url: string) {

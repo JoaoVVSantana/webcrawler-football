@@ -1,6 +1,15 @@
 import 'dotenv/config';
 import fs from 'fs';
 
+function parseNumberList(input: string | undefined, fallback: number[]): number[] {
+  if (!input) return fallback;
+  const values = input
+    .split(',')
+    .map(item => Number(item.trim()))
+    .filter(value => !Number.isNaN(value) && value > 0);
+  return values.length ? Array.from(new Set(values)) : fallback;
+}
+
 let seedUrls: string[] = [];
 
 if (process.env.SEEDS_FILE) 
@@ -34,4 +43,15 @@ export const CRAWLER_CONFIG = {
   userAgentHeader: process.env.CRAWLER_USER_AGENT ?? 'CrawlerBrasileirao/0.1',
   acceptHeader: 'text/html,application/xhtml+xml',
   languageHeader: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+};
+
+const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 240]);
+
+export const INDEX_CONFIG = {
+  chunkSizes: defaultChunkSizes,
+  primaryChunkSize: defaultChunkSizes[0],
+  minTokenLength: Math.max(2, Number(process.env.INDEX_MIN_TOKEN_LENGTH ?? 3)),
+  topTermsLimit: Math.max(5, Number(process.env.LEXICAL_TOP_TERMS ?? 12)),
+  maxTokensPerDocument: Number(process.env.INDEX_MAX_TOKENS ?? 25000),
+  granularity: (process.env.INDEX_GRANULARITY ?? 'token').toLowerCase()
 };

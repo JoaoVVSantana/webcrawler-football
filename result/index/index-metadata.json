@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2025-10-11T17:49:13.580Z",
+  "documentsIndexed": 33,
+  "tokensIndexed": 29326,
+  "truncatedDocuments": 0,
+  "buildTimeMs": 52726.337,
+  "indexFileBytes": 6323961,
+  "indexFile": "result\\index\\inverted-index.json",
+  "chunkSizeStats": [
+    {
+      "chunkSize": 160,
+      "vocabularySize": 1674,
+      "totalChunks": 200,
+      "totalTokens": 29326
+    },
+    {
+      "chunkSize": 240,
+      "vocabularySize": 1674,
+      "totalChunks": 140,
+      "totalTokens": 29326
+    }
+  ],
+  "memoryUsage": {
+    "rss": 624136192,
+    "heapTotal": 302534656,
+    "heapUsed": 269664472,
+    "external": 33316348
+  },
+  "indexingConfig": {
+    "chunkSizes": [
+      160,
+      240
+    ],
+    "primaryChunkSize": 160,
+    "minTokenLength": 3,
+    "maxTokensPerDocument": 25000
+  }
+}

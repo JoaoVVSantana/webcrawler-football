@@ -139,6 +139,141 @@ export abstract class BaseAdapter implements Adapter
 
     return { type, provider, url: url?.trim() || undefined };
   }
-}
 
+  protected extractSportsEventsFromJsonLd(
+    html: string,
+    sourceUrl: string,
+    sourceLabel: string,
+    defaultConfidence = 0.75
+  ): MatchItem[] {
+    const matches: MatchItem[] = [];
+    const scriptBlocks = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) ?? [];
+
+    for (const scriptBlock of scriptBlocks) {
+      const jsonPayload = scriptBlock.replace(/^[\s\S]*?>/, '').replace(/<\/script>\s*$/i, '');
+      try {
+        const parsedJson = JSON.parse(jsonPayload);
+        const entries = Array.isArray(parsedJson) ? parsedJson : [parsedJson];
+
+        for (const entry of entries) {
+          const match = this.mapSportsEventEntry(entry, sourceUrl, sourceLabel, defaultConfidence);
+          if (match) matches.push(match);
+        }
+      } catch {
+        // ignore malformed json-ld blocks
+      }
+    }
+
+    return this.deduplicateMatches(matches);
+  }
+
+  private mapSportsEventEntry(
+    candidate: Record<string, any>,
+    sourceFallbackUrl: string,
+    sourceLabel: string,
+    defaultConfidence: number
+  ): MatchItem | undefined {
+    if (!candidate || typeof candidate !== 'object') return undefined;
+
+    const type = candidate['@type'];
+    if (type !== 'SportsEvent' && type !== 'Event') return undefined;
+
+    const homeTeamName = this.resolveTeamName(candidate.homeTeam ?? candidate.competitor?.[0]);
+    const awayTeamName = this.resolveTeamName(candidate.awayTeam ?? candidate.competitor?.[1]);
+
+    if (!homeTeamName || !awayTeamName) return undefined;
+
+    const competitionName =
+      candidate.superEvent?.name ??
+      candidate.tournament?.name ??
+      candidate.competition?.name ??
+      candidate.name;
+
+    const startDate = this.resolveStartDate(candidate);
+    if (!startDate) return undefined;
+
+    const broadcastEntries: Broadcast[] = [];
+    const broadcastCandidates = this.resolveBroadcastCandidates(candidate);
+    for (const broadcastCandidate of broadcastCandidates) {
+      const nameCandidate =
+        broadcastCandidate?.name ??
+        broadcastCandidate?.provider ??
+        broadcastCandidate?.broadcastService?.name ??
+        broadcastCandidate?.organizer?.name;
+
+      const urlCandidate =
+        broadcastCandidate?.url ?? broadcastCandidate?.sameAs ?? broadcastCandidate?.publication?.url;
+
+      const mapped = this.mapBroadcastSource(nameCandidate, urlCandidate);
+      if (mapped) broadcastEntries.push(mapped);
+    }
+
+    return {
+      homeTeam: homeTeamName,
+      awayTeam: awayTeamName,
+      competition: typeof competitionName === 'string' ? competitionName : undefined,
+      dateTimeUtc: startDate,
+      sourceUrl: typeof candidate.url === 'string' ? candidate.url : sourceFallbackUrl,
+      sourceName: sourceLabel,
+      whereToWatch: broadcastEntries.length ? broadcastEntries : undefined,
+      confidence: defaultConfidence
+    };
+  }
+
+  private resolveTeamName(candidate: unknown): string | undefined {
+    if (!candidate) return undefined;
+
+    if (typeof candidate === 'string') return this.standardizeTeamName(candidate);
+
+    if (Array.isArray(candidate)) {
+      for (const entry of candidate) {
+        const resolved = this.resolveTeamName(entry);
+        if (resolved) return resolved;
+      }
+      return undefined;
+    }
+
+    if (typeof candidate === 'object') {
+      const payload = candidate as Record<string, any>;
+      return this.standardizeTeamName(
+        payload.popularName ??
+          payload.commonName ??
+          payload.shortName ??
+          payload.name ??
+          payload['@id'] ??
+          payload.alternateName
+      );
+    }
+
+    return undefined;
+  }
+
+  private resolveStartDate(candidate: Record<string, any>): string | undefined {
+    const startDate = candidate.startDate ?? candidate.startTime ?? candidate.startDateTime ?? candidate.start;
+    if (typeof startDate === 'string' && startDate.trim()) return startDate.trim();
+    if (typeof startDate === 'number') return new Date(startDate * 1000).toISOString();
+
+    const potentialDate = candidate.eventSchedule?.startDate ?? candidate.endDate ?? candidate.date;
+    if (typeof potentialDate === 'string' && potentialDate.trim()) return potentialDate.trim();
+
+    return undefined;
+  }
+
+  private resolveBroadcastCandidates(candidate: Record<string, any>): Array<Record<string, any>> {
+    const candidates: Array<Record<string, any>> = [];
+    const fields = ['broadcastOfEvent', 'broadcast', 'subjectOf', 'offers', 'publication', 'organizer'];
+
+    for (const field of fields) {
+      const payload = candidate[field];
+      if (Array.isArray(payload)) {
+        for (const entry of payload) {
+          if (entry && typeof entry === 'object') candidates.push(entry);
+        }
+      } else if (payload && typeof payload === 'object') {
+        candidates.push(payload);
+      }
+    }
+    return candidates;
+  }
+}
 
