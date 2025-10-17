@@ -74,7 +74,7 @@ export const CRAWLER_CONFIG = {
   resumeFrontier: (process.env.FRONTIER_RESUME ?? 'true').toLowerCase() === 'true',
   frontierSnapshotPath:
     process.env.FRONTIER_SNAPSHOT_PATH ?? path.join(process.cwd(), 'result', 'frontier-state.json'),
-  frontierSnapshotIntervalMs: Number(process.env.FRONTIER_SNAPSHOT_INTERVAL_MS ?? 60000),
+  frontierSnapshotIntervalMs: Number(process.env.FRONTIER_SNAPSHOT_INTERVAL_MS ?? 200),
   maxRuntimeMs: Number(process.env.MAX_RUNTIME_MINUTES ?? 0) * 60_000,
   fallbackLinkLimit: Number(process.env.FALLBACK_LINK_LIMIT ?? 18),
   index: {
