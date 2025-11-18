@@ -5,10 +5,8 @@ import { fetchHtml } from './crawler/fetcher';
 import { createDocumentMetadata, extractUniqueLinks } from './crawler/extractor';
 import { isHttpOrHttpsUrl } from './utils/url';
 import { CrawlTask } from './types';
-import { scheduleDocumentPersist, flushPipelineQueues } from './pipelines/pipelineQueue';
-import { closeDocumentStream } from './pipelines/store';
+import { scheduleDocumentPersist, flushPipelineQueues, shutdownDocumentPipeline } from './pipelines/pipelineQueue';
 import { saveMetrics } from './utils/metrics';
-import { finalizeInvertedIndex } from './indexing/invertedIndex';
 import { isBlockedUrl } from './utils/urlFilters';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -134,7 +132,7 @@ async function main() {
   const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
   await Promise.all(workers);
   await flushPipelineQueues();
-  await closeDocumentStream();
+  await shutdownDocumentPipeline();
 
   const endTime = new Date().toISOString();
   console.log(
@@ -157,14 +155,12 @@ async function main() {
     sourceBreakdown,
     stopReason: stopReason ?? undefined
   });
-  finalizeInvertedIndex();
 }
 
 main().catch(async err => {
   console.log({ err }, 'Erro fatal');
   await flushPipelineQueues();
-  await closeDocumentStream();
-  finalizeInvertedIndex();
+  await shutdownDocumentPipeline();
   process.exit(1);
 });
 

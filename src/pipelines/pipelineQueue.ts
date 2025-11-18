@@ -1,51 +1,91 @@
+import { Worker } from 'worker_threads';
 import { DocumentRecord } from '../types';
-import { persistDocumentMetadata } from './store';
 
-const DEFAULT_BATCH_SIZE = Math.max(1, Number(process.env.PIPELINE_BATCH_SIZE ?? 25));
+type PendingRequest = {
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
 
-class PipelineQueue {
-  private readonly batchSize = DEFAULT_BATCH_SIZE;
-  private readonly queue: DocumentRecord[] = [];
-  private processingPromise: Promise<void> | null = null;
+const baseExecArgv = process.execArgv;
+const isTypeScriptRuntime = import.meta.url.endsWith('.ts');
+const worker = isTypeScriptRuntime ? createTypeScriptWorker() : createJavaScriptWorker();
 
-  enqueue(record: DocumentRecord): void {
-    this.queue.push(record);
-    this.scheduleProcessing();
-  }
+const pendingRequests = new Map<number, PendingRequest>();
+let messageCounter = 0;
 
-  async flush(): Promise<void> {
-    if (!this.processingPromise && this.queue.length) {
-      this.scheduleProcessing();
-    }
-    if (this.processingPromise) await this.processingPromise;
-  }
-
-  private scheduleProcessing(): void {
-    if (this.processingPromise) return;
-    this.processingPromise = this.processQueue();
-  }
-
-  private async processQueue(): Promise<void> {
+function createTypeScriptWorker(): Worker {
+  const moduleUrl = new URL('./documentWorker.ts', import.meta.url).href;
+  const bootstrap = `
+    import { workerData } from 'worker_threads';
+    import { register } from 'tsx/esm/api';
+    register();
     try {
-      while (this.queue.length) {
-        const batch = this.queue.splice(0, this.batchSize);
-        for (const record of batch) {
-          await persistDocumentMetadata(record);
-        }
-      }
-    } finally {
-      this.processingPromise = null;
-      if (this.queue.length) this.scheduleProcessing();
+      await import(workerData.moduleUrl);
+    } catch (error) {
+      console.error('[document-worker-bootstrap]', error);
+      throw error;
     }
-  }
+  `;
+  return new Worker(bootstrap, {
+    eval: true,
+    type: 'module',
+    workerData: { moduleUrl },
+    execArgv: baseExecArgv,
+  });
 }
 
-const pipelineQueue = new PipelineQueue();
+function createJavaScriptWorker(): Worker {
+  const workerScript = new URL('./documentWorker.js', import.meta.url);
+  return new Worker(workerScript, { execArgv: baseExecArgv });
+}
+
+worker.on('message', (message: any) => {
+  if (!message || typeof message !== 'object') return;
+  const { id, type, error } = message;
+  if (typeof id !== 'number') return;
+  const pending = pendingRequests.get(id);
+  if (!pending) return;
+  pendingRequests.delete(id);
+  if (error) pending.reject(new Error(error));
+  else pending.resolve();
+});
+
+worker.on('error', error => {
+  for (const pending of pendingRequests.values()) {
+    pending.reject(error);
+  }
+  pendingRequests.clear();
+  console.error('Document worker failed:', error);
+});
+
+worker.on('exit', code => {
+  if (code !== 0) {
+    const error = new Error(`Document worker exited with code ${code}`);
+    for (const pending of pendingRequests.values()) {
+      pending.reject(error);
+    }
+    pendingRequests.clear();
+    console.error(error);
+  }
+});
+
+function sendRequest(type: 'flush' | 'shutdown'): Promise<void> {
+  const requestId = messageCounter++;
+  return new Promise<void>((resolve, reject) => {
+    pendingRequests.set(requestId, { resolve, reject });
+    worker.postMessage({ type, id: requestId });
+  });
+}
 
 export function scheduleDocumentPersist(record: DocumentRecord): void {
-  pipelineQueue.enqueue(record);
+  worker.postMessage({ type: 'document', record });
 }
 
-export async function flushPipelineQueues(): Promise<void> {
-  await pipelineQueue.flush();
+export function flushPipelineQueues(): Promise<void> {
+  return sendRequest('flush');
+}
+
+export async function shutdownDocumentPipeline(): Promise<void> {
+  await sendRequest('shutdown');
+  await worker.terminate();
 }
