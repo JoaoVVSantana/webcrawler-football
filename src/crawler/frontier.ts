@@ -38,10 +38,20 @@ export class CrawlFrontier {
   }
 
   pop(): CrawlTask | undefined {
-    const nextTask = this.queue.shift();
-    if (!nextTask) return undefined;
-    this.queuedUrls.delete(nextTask.url);
-    this.visitedUrls.add(nextTask.url);
+    if (this.queue.length === 0) return undefined;
+
+    const nextTask = this.queue[0];
+    const lastTask = this.queue.pop();
+    if (this.queue.length > 0 && lastTask) {
+      this.queue[0] = lastTask;
+      this.heapifyDown(0);
+    }
+
+    if (nextTask) {
+      this.queuedUrls.delete(nextTask.url);
+      this.visitedUrls.add(nextTask.url);
+    }
+
     return nextTask;
   }
 
@@ -70,6 +80,7 @@ export class CrawlFrontier {
     }
 
     this.queue = restoredQueue;
+    this.heapifyAll();
     this.queuedUrls = restoredQueued;
     this.visitedUrls = new Set(
       (state.visited ?? []).map(url => canonicalizeUrl(url)).filter(url => !isBlockedUrl(url))
@@ -83,22 +94,46 @@ export class CrawlFrontier {
   }
 
   private enqueue(task: CrawlTask): void {
-    if (this.queue.length === 0) {
-      this.queue.push(task);
-      return;
+    this.queue.push(task);
+    this.heapifyUp(this.queue.length - 1);
+  }
+
+  private heapifyUp(index: number): void {
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (this.compare(parentIndex, index) >= 0) break;
+      this.swap(parentIndex, index);
+      index = parentIndex;
     }
+  }
 
-    const priority = resolvePriority(task);
-    let low = 0;
-    let high = this.queue.length;
+  private heapifyDown(index: number): void {
+    const length = this.queue.length;
+    while (true) {
+      const left = 2 * index + 1;
+      const right = left + 1;
+      let largest = index;
 
-    while (low < high) {
-      const mid = Math.floor((low + high) / 2);
-      const midPriority = resolvePriority(this.queue[mid]);
-      if (midPriority < priority) high = mid;
-      else low = mid + 1;
+      if (left < length && this.compare(left, largest) > 0) largest = left;
+      if (right < length && this.compare(right, largest) > 0) largest = right;
+
+      if (largest === index) break;
+      this.swap(index, largest);
+      index = largest;
     }
+  }
 
-    this.queue.splice(low, 0, task);
+  private heapifyAll(): void {
+    for (let i = Math.floor(this.queue.length / 2) - 1; i >= 0; i--) {
+      this.heapifyDown(i);
+    }
+  }
+
+  private compare(firstIndex: number, secondIndex: number): number {
+    return resolvePriority(this.queue[firstIndex]) - resolvePriority(this.queue[secondIndex]);
+  }
+
+  private swap(i: number, j: number): void {
+    [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
   }
 }
