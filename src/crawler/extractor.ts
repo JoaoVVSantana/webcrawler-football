@@ -1,13 +1,13 @@
 import * as crypto from 'crypto';
 import * as cheerio from 'cheerio';
-import { DocumentItem, DocumentRecord } from '../types';
+import { DocumentItem, DocumentRecord, PageType } from '../types';
 import { analyzeAndNormalizeText } from '../utils/textProcessing';
 
 export function generateHtmlHash(html: string): string {
   return crypto.createHash('sha256').update(html).digest('hex');
 }
 
-export function createDocumentMetadata(url: string, html: string): DocumentRecord {
+export function createDocumentMetadata(url: string, html: string, pageType?: PageType): DocumentRecord {
   const $ = cheerio.load(html);
   $('script, style, noscript, iframe').remove();
   const rawText = $('body').text();
@@ -21,6 +21,7 @@ export function createDocumentMetadata(url: string, html: string): DocumentRecor
     status: 200,
     title,
     lang,
+    pageType,
     rawHtmlHash: generateHtmlHash(html),
     contentLength: html.length,
     cleanedContentLength: normalizedText.length || undefined,

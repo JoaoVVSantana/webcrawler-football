@@ -60,12 +60,12 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   if (!response) return { matches: 0 };
 
   const html = response.body;
-  const documentRecord = createDocumentMetadata(crawlerTask.url, html);
+  const selectedAdapter = findAdapterForUrl(crawlerTask.url);
+  const pageType = selectedAdapter ? selectedAdapter.classify(crawlerTask.url) : 'outro';
+  const documentRecord = createDocumentMetadata(crawlerTask.url, html, pageType);
   documentRecord.metadata.status = response.statusCode;
 
   await persistDocumentMetadata(documentRecord);
-
-  const selectedAdapter = findAdapterForUrl(crawlerTask.url);
   if (selectedAdapter) {
 
     const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url);
