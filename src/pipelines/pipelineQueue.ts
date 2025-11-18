@@ -1,20 +1,15 @@
-import { DocumentRecord, MatchItem } from '../types';
-import { persistDocumentMetadata, persistMatches } from './store';
-import { appendMatchesToCsv } from './csvStore';
-
-type PipelineJob =
-  | { type: 'document'; record: DocumentRecord }
-  | { type: 'matches'; matches: MatchItem[] };
+import { DocumentRecord } from '../types';
+import { persistDocumentMetadata } from './store';
 
 const DEFAULT_BATCH_SIZE = Math.max(1, Number(process.env.PIPELINE_BATCH_SIZE ?? 25));
 
 class PipelineQueue {
   private readonly batchSize = DEFAULT_BATCH_SIZE;
-  private readonly queue: PipelineJob[] = [];
+  private readonly queue: DocumentRecord[] = [];
   private processingPromise: Promise<void> | null = null;
 
-  enqueue(job: PipelineJob): void {
-    this.queue.push(job);
+  enqueue(record: DocumentRecord): void {
+    this.queue.push(record);
     this.scheduleProcessing();
   }
 
@@ -34,9 +29,8 @@ class PipelineQueue {
     try {
       while (this.queue.length) {
         const batch = this.queue.splice(0, this.batchSize);
-        for (const job of batch) {
-          if (job.type === 'document') await persistDocumentMetadata(job.record);
-          else if (job.type === 'matches') await appendMatchesToCsv(job.matches);
+        for (const record of batch) {
+          await persistDocumentMetadata(record);
         }
       }
     } finally {
@@ -49,13 +43,7 @@ class PipelineQueue {
 const pipelineQueue = new PipelineQueue();
 
 export function scheduleDocumentPersist(record: DocumentRecord): void {
-  pipelineQueue.enqueue({ type: 'document', record });
-}
-
-export function scheduleMatchesPersist(matches: MatchItem[]): void {
-  if (!matches.length) return;
-  pipelineQueue.enqueue({ type: 'matches', matches });
-  persistMatches(matches);
+  pipelineQueue.enqueue(record);
 }
 
 export async function flushPipelineQueues(): Promise<void> {

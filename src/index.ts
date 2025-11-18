@@ -4,118 +4,49 @@ import { CrawlFrontier } from './crawler/frontier';
 import { fetchHtml } from './crawler/fetcher';
 import { createDocumentMetadata, extractUniqueLinks } from './crawler/extractor';
 import { isHttpOrHttpsUrl } from './utils/url';
-import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
-import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
-import { CbfAdapter } from './adapters/cbfAdapter';
-import { UolOndeAssistirAdapter } from './adapters/uolOndeAssistir';
-import { LanceAgendaAdapter } from './adapters/lanceAgenda';
-import { OneFootballAdapter } from './adapters/oneFootball';
-import { GenericSportsNewsAdapter } from './adapters/genericSportsNews';
-import { Adapter, CrawlTask, PageType } from './types';
-import { scheduleDocumentPersist, scheduleMatchesPersist, flushPipelineQueues } from './pipelines/pipelineQueue';
+import { CrawlTask } from './types';
+import { scheduleDocumentPersist, flushPipelineQueues } from './pipelines/pipelineQueue';
+import { closeDocumentStream } from './pipelines/store';
 import { saveMetrics } from './utils/metrics';
 import { finalizeInvertedIndex } from './indexing/invertedIndex';
 import { isBlockedUrl } from './utils/urlFilters';
 
-const adapters: Adapter[] = [
-  new GeTeamAgendaAdapter(),
-  new EspnTeamAgendaAdapter(),
-  new CbfAdapter(),
-  new UolOndeAssistirAdapter(),
-  new LanceAgendaAdapter(),
-  new OneFootballAdapter(),
-  new GenericSportsNewsAdapter()
-];
-
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-const FALLBACK_LINK_LIMIT = Math.max(0, CRAWLER_CONFIG.fallbackLinkLimit ?? 0);
+const MAX_LINKS_PER_PAGE = Math.max(0, CRAWLER_CONFIG.fallbackLinkLimit ?? 0);
+const INITIAL_PRIORITY = 100;
+const PRIORITY_DECAY = 1;
 
-const PAGE_PRIORITY_BOOST: Record<PageType, number> = {
-  agenda: 25,
-  'onde-assistir': 22,
-  tabela: 18,
-  match: 18,
-  team: 12,
-  noticia: 6,
-  outro: 0
-};
-
-function findAdapterForUrl(url: string): Adapter | undefined {
-  const normalizedUrl = url.toLowerCase();
-  return adapters.find(adapter => adapter.whitelistPatterns.some(pattern => pattern.test(normalizedUrl)));
-}
-
-function computeNextPriority(adapter: Adapter, url: string, parentPriority: number | undefined): number {
-  const pageType = adapter.classify(url);
-  const boost = PAGE_PRIORITY_BOOST[pageType] ?? 0;
-  const base = parentPriority ?? 0;
-  return base - 1 + boost;
-}
-
-async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier): Promise<{ matches: number } | undefined> {
-  if (isBlockedUrl(crawlerTask.url)) return { matches: 0 };
+async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier): Promise<void> {
+  if (isBlockedUrl(crawlerTask.url)) return;
 
   const response = await fetchHtml(crawlerTask.url);
-  if (!response) return { matches: 0 };
+  if (!response) return;
 
   const html = response.body;
   const dom = cheerio.load(html);
-  const selectedAdapter = findAdapterForUrl(crawlerTask.url);
-  const pageType = selectedAdapter ? selectedAdapter.classify(crawlerTask.url) : 'outro';
-  const documentRecord = createDocumentMetadata(crawlerTask.url, html, pageType, dom);
+  const documentRecord = createDocumentMetadata(crawlerTask.url, html, undefined, dom);
   documentRecord.metadata.status = response.statusCode;
 
   scheduleDocumentPersist(documentRecord);
-  if (selectedAdapter) {
 
-    const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url, dom);
-    if (matches.length) {
-      scheduleMatchesPersist(matches);
-    }
+  const outgoingLinks = extractUniqueLinks(crawlerTask.url, html, dom).filter(
+    link => isHttpOrHttpsUrl(link) && !isBlockedUrl(link)
+  );
 
-    if (nextLinks.length) {
-      for (const link of nextLinks) {
-        try {
-          const currentLink = new URL(link, crawlerTask.url).toString();
-          if (isBlockedUrl(currentLink)) continue;
-          if (!isHttpOrHttpsUrl(currentLink)) continue;
-          if (!selectedAdapter.whitelistPatterns.some(pattern => pattern.test(currentLink))) continue;
-          if (frontier.has(currentLink)) continue;
+  const nextPriority = (crawlerTask.priority ?? INITIAL_PRIORITY) - PRIORITY_DECAY;
+  const linksToEnqueue = MAX_LINKS_PER_PAGE > 0 ? outgoingLinks.slice(0, MAX_LINKS_PER_PAGE) : outgoingLinks;
 
-          const nextPriority = computeNextPriority(selectedAdapter, currentLink, crawlerTask.priority);
-          frontier.push({
-            url: currentLink,
-            depth: (crawlerTask.depth ?? 0) + 1,
-            priority: nextPriority
-          });
-        } catch {
-          // ignore malformed URLs
-        }
-      }
-    }
-
-    return { matches: matches.length };
-  }
-
-  if (FALLBACK_LINK_LIMIT > 0) {
-    const fallbackLinks = extractUniqueLinks(crawlerTask.url, html, dom)
-      .filter(link => isHttpOrHttpsUrl(link) && !isBlockedUrl(link));
-
-    for (const rawLink of fallbackLinks.slice(0, FALLBACK_LINK_LIMIT)) {
-      try {
-        if (frontier.has(rawLink)) continue;
-        frontier.push({
-          url: rawLink,
-          depth: (crawlerTask.depth ?? 0) + 1,
-          priority: (crawlerTask.priority ?? 0) - 2
-        });
-      } catch {
-        // ignore malformed URLs
-      }
+  for (const link of linksToEnqueue) {
+    try {
+      frontier.pushIfAbsent({
+        url: link,
+        depth: (crawlerTask.depth ?? 0) + 1,
+        priority: nextPriority
+      });
+    } catch {
+      // ignore malformed URLs
     }
   }
-
-  return { matches: 0 };
 }
 
 async function main() {
@@ -130,7 +61,7 @@ async function main() {
   const frontier = new CrawlFrontier();
 
   for (const seed of CRAWLER_CONFIG.seeds) {
-    frontier.push({ url: seed, depth: 0, priority: 100 });
+    frontier.push({ url: seed, depth: 0, priority: INITIAL_PRIORITY });
   }
 
   const statistics = {
@@ -183,8 +114,7 @@ async function main() {
           'Processando'
         );
 
-        const result = await processCrawlTask(task, frontier);
-        if (result?.matches) statistics.matchesFound += result.matches;
+        await processCrawlTask(task, frontier);
         const domain = new URL(task.url).hostname;
         sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
       } catch (e: any) {
@@ -204,6 +134,7 @@ async function main() {
   const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
   await Promise.all(workers);
   await flushPipelineQueues();
+  await closeDocumentStream();
 
   const endTime = new Date().toISOString();
   console.log(
@@ -232,6 +163,7 @@ async function main() {
 main().catch(async err => {
   console.log({ err }, 'Erro fatal');
   await flushPipelineQueues();
+  await closeDocumentStream();
   finalizeInvertedIndex();
   process.exit(1);
 });

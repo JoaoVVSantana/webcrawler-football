@@ -26,15 +26,24 @@ export class CrawlFrontier {
   }
 
   push(task: CrawlTask): void {
+    this.tryEnqueue(task);
+  }
+
+  pushIfAbsent(task: CrawlTask): boolean {
+    return this.tryEnqueue(task);
+  }
+
+  private tryEnqueue(task: CrawlTask): boolean {
     const normalizedUrl = canonicalizeUrl(task.url);
 
-    if ((task.depth ?? 0) > this.maxDepth) return;
-    if (isBlockedUrl(normalizedUrl)) return;
-    if (this.visitedUrls.has(normalizedUrl) || this.queuedUrls.has(normalizedUrl)) return;
+    if ((task.depth ?? 0) > this.maxDepth) return false;
+    if (isBlockedUrl(normalizedUrl)) return false;
+    if (this.visitedUrls.has(normalizedUrl) || this.queuedUrls.has(normalizedUrl)) return false;
 
     const normalizedTask: CrawlTask = { ...task, url: normalizedUrl };
     this.enqueue(normalizedTask);
     this.queuedUrls.add(normalizedUrl);
+    return true;
   }
 
   pop(): CrawlTask | undefined {
