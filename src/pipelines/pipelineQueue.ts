@@ -28,7 +28,6 @@ function createTypeScriptWorker(): Worker {
   `;
   return new Worker(bootstrap, {
     eval: true,
-    type: 'module',
     workerData: { moduleUrl },
     execArgv: baseExecArgv,
   });

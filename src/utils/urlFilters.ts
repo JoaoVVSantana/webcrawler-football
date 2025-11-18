@@ -64,7 +64,31 @@ const BLOCKED_PATH_PATTERNS: RegExp[] = [
   /\/telegram\b/i
 ];
 
-const BLOCKED_EXTENSIONS = ['.gif', '.jpg', '.jpeg', '.png', '.svg', '.ico', '.webp', '.mp4', '.mp3', '.avi', '.mov'];
+const BLOCKED_EXTENSIONS = [
+  '.gif',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.svg',
+  '.ico',
+  '.webp',
+  '.mp4',
+  '.mp3',
+  '.avi',
+  '.mov',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.ppt',
+  '.pptx',
+  '.xls',
+  '.xlsx',
+  '.zip',
+  '.rar',
+  '.7z',
+  '.gz',
+  '.tar'
+];
 
 export function isBlockedUrl(candidateUrl: string): boolean {
   let parsedUrl: URL;

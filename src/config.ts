@@ -2,7 +2,7 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 
-type FrontierStrategy = 'priority' | 'dfs';
+type FrontierStrategy = 'priority' | 'dfs' | 'bfs';
 
 function parseNumberList(input: string | undefined, fallback: number[]): number[] {
   if (!input) return fallback;
@@ -64,16 +64,23 @@ seedUrls = Array.from(new Set(seedUrls.filter(Boolean)));
 
 const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 240]);
 const normalizedFrontierStrategy = (process.env.CRAWLER_STRATEGY ?? 'priority').toLowerCase();
-const processedFrontierStrategy: FrontierStrategy = normalizedFrontierStrategy === 'dfs' ? 'dfs' : 'priority';
+const processedFrontierStrategy: FrontierStrategy =
+  normalizedFrontierStrategy === 'dfs'
+    ? 'dfs'
+    : normalizedFrontierStrategy === 'bfs'
+    ? 'bfs'
+    : 'priority';
 const exploreAllLinks = (process.env.CRAWLER_PROCESS_ALL_LINKS ?? 'true').toLowerCase() === 'true';
 
 export const CRAWLER_CONFIG = {
-  globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 8),
-  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 4),
-  requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 15000),
+  globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 15),
+  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 15),
+  requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 5000),
   seeds: seedUrls,
   respectRobots: (process.env.RESPECT_ROBOTS ?? 'true').toLowerCase() === 'true',
-  userAgentHeader: process.env.CRAWLER_USER_AGENT ?? 'CrawlerBrasileirao/0.1',
+  userAgentHeader:
+    process.env.CRAWLER_USER_AGENT ||
+    'WebCrawlerFootball/1.0 (+contato: seu-email@dominio.com; proposito: monitoramento futebol)',
   acceptHeader: 'text/html,application/xhtml+xml',
   languageHeader: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
   maxRuntimeMs: Number(process.env.MAX_RUNTIME_MINUTES ?? 0) * 60_000,

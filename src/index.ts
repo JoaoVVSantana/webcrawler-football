@@ -15,10 +15,10 @@ const PROCESS_ALL_LINKS = CRAWLER_CONFIG.processAllLinksFromPage !== false;
 const INITIAL_PRIORITY = 100;
 const PRIORITY_DECAY = 1;
 
-async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier): Promise<void> {
+async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier, workerId: number): Promise<void> {
   if (isBlockedUrl(crawlerTask.url)) return;
 
-  const response = await fetchHtml(crawlerTask.url);
+  const response = await fetchHtml(crawlerTask.url, workerId);
   if (!response) return;
 
   const html = response.body;
@@ -95,6 +95,7 @@ async function main() {
   let activeFetches = 0;
 
   async function worker(workerId: number) {
+    let emptyCycles = 0;
     while (true) {
       if (stopRequested) break;
       if (CRAWLER_CONFIG.maxRuntimeMs > 0 && Date.now() - startTimestamp >= CRAWLER_CONFIG.maxRuntimeMs) {
@@ -110,15 +111,28 @@ async function main() {
 
       const task = frontier.pop();
       if (!task) {
+        emptyCycles++;
+        if (emptyCycles % 100 === 0) {
+          console.log(
+            {
+              worker: workerId,
+              frontierSize: frontier.size(),
+              activeFetches,
+              processed: statistics.processed
+            },
+            'Worker aguardando tarefas'
+          );
+        }
         if (stopRequested) break;
         if (activeFetches === 0 && frontier.size() === 0) {
           stopRequested = true;
           stopReason = stopReason ?? 'frontier_empty';
           break;
         }
-        await sleep(25);
+        await sleep(5);
         continue;
       }
+      emptyCycles = 0;
 
       activeFetches++;
       try {
@@ -132,7 +146,7 @@ async function main() {
           'Processando'
         );
 
-        await processCrawlTask(task, frontier);
+        await processCrawlTask(task, frontier, workerId);
         const domain = new URL(task.url).hostname;
         sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
       } catch (e: any) {
@@ -155,6 +169,8 @@ async function main() {
   await shutdownDocumentPipeline();
 
   const endTime = new Date().toISOString();
+  const durationSeconds = Math.max(1, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000);
+  const pagesPerSecond = statistics.processed / durationSeconds;
   console.log(
     {
       processed: statistics.processed,
@@ -172,6 +188,7 @@ async function main() {
     pagesProcessed: statistics.processed,
     matchesFound: statistics.matchesFound,
     errorCount: statistics.errorCount,
+    pagesPerSecond,
     sourceBreakdown,
     stopReason: stopReason ?? undefined
   });
@@ -183,4 +200,3 @@ main().catch(async err => {
   await shutdownDocumentPipeline();
   process.exit(1);
 });
-

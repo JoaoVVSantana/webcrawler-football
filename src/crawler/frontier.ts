@@ -2,7 +2,7 @@ import { canonicalizeUrl } from '../utils/url';
 import { isBlockedUrl } from '../utils/urlFilters';
 import type { CrawlTask } from '../types';
 
-type FrontierStrategy = 'priority' | 'dfs';
+type FrontierStrategy = 'priority' | 'dfs' | 'bfs';
 
 function resolvePriority(task: CrawlTask): number {
   return task.priority ?? 0;
@@ -22,6 +22,7 @@ export class CrawlFrontier {
   private readonly maxDepth: number;
   private readonly strategy: FrontierStrategy;
   private queue: CrawlTask[] = [];
+  private queueHead = 0;
   private queuedUrls = new Set<string>();
   private visitedUrls = new Set<string>();
 
@@ -31,6 +32,9 @@ export class CrawlFrontier {
   }
 
   size(): number {
+    if (this.strategy === 'bfs') {
+      return Math.max(0, this.queue.length - this.queueHead);
+    }
     return this.queue.length;
   }
 
@@ -60,11 +64,17 @@ export class CrawlFrontier {
   }
 
   pop(): CrawlTask | undefined {
-    if (this.queue.length === 0) return undefined;
+    if (this.size() === 0) return undefined;
 
     let nextTask: CrawlTask | undefined;
     if (this.strategy === 'dfs') {
       nextTask = this.queue.pop();
+    } else if (this.strategy === 'bfs') {
+      nextTask = this.queue[this.queueHead++];
+      if (this.queueHead > 1024 && this.queueHead > this.queue.length / 2) {
+        this.queue = this.queue.slice(this.queueHead);
+        this.queueHead = 0;
+      }
     } else {
       nextTask = this.queue[0];
       const lastTask = this.queue.pop();
@@ -88,8 +98,10 @@ export class CrawlFrontier {
   }
 
   serialize(): FrontierSerializedState {
+    const activeQueue = this.strategy === 'bfs' ? this.queue.slice(this.queueHead) : this.queue;
+
     return {
-      queue: this.queue.map(task => ({ ...task })),
+      queue: activeQueue.map(task => ({ ...task })),
       visited: Array.from(this.visitedUrls)
     };
   }
@@ -107,6 +119,7 @@ export class CrawlFrontier {
     }
 
     this.queue = restoredQueue;
+    this.queueHead = 0;
     if (this.strategy === 'priority') {
       this.heapifyAll();
     }
@@ -118,6 +131,7 @@ export class CrawlFrontier {
 
   clear(): void {
     this.queue = [];
+    this.queueHead = 0;
     this.queuedUrls.clear();
     this.visitedUrls.clear();
   }
