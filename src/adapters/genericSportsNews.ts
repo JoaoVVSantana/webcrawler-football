@@ -55,9 +55,9 @@ export class GenericSportsNewsAdapter extends BaseAdapter {
     return super.classify(url);
   }
 
-  extract(html: string, url: string) {
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
     const jsonLdMatches = this.extractSportsEventsFromJsonLd(html, url, 'Generic sports (json-ld)', 0.65);
-    const dom = cheerio.load(html);
+    const dom = domInstance ?? cheerio.load(html);
     const htmlMatches = jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
     const matches = this.deduplicateMatches([...jsonLdMatches, ...htmlMatches]);
     const nextLinks = this.collectAllowedLinks(dom, url);

@@ -1,3 +1,5 @@
+import type { CheerioAPI } from 'cheerio';
+
 export type PageType = 'agenda' | 'onde-assistir' | 'tabela' | 'noticia' | 'outro' | 'team' | 'match';
 
 export interface CrawlTask {
@@ -60,7 +62,7 @@ export interface Adapter {
   domain: string;
   whitelistPatterns: RegExp[];
   classify(url: string): PageType;
-  extract(doc: string, url: string): {
+  extract(doc: string, url: string, dom?: CheerioAPI): {
     document?: Partial<DocumentItem>;
     matches?: MatchItem[];
     nextLinks?: string[];

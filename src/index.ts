@@ -1,3 +1,4 @@
+import * as cheerio from 'cheerio';
 import { CRAWLER_CONFIG } from './config';
 import { CrawlFrontier } from './crawler/frontier';
 import { fetchHtml } from './crawler/fetcher';
@@ -60,15 +61,16 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   if (!response) return { matches: 0 };
 
   const html = response.body;
+  const dom = cheerio.load(html);
   const selectedAdapter = findAdapterForUrl(crawlerTask.url);
   const pageType = selectedAdapter ? selectedAdapter.classify(crawlerTask.url) : 'outro';
-  const documentRecord = createDocumentMetadata(crawlerTask.url, html, pageType);
+  const documentRecord = createDocumentMetadata(crawlerTask.url, html, pageType, dom);
   documentRecord.metadata.status = response.statusCode;
 
   await persistDocumentMetadata(documentRecord);
   if (selectedAdapter) {
 
-    const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url);
+    const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url, dom);
     if (matches.length) {
       await persistMatches(matches);
       await appendMatchesToCsv(matches);
@@ -99,7 +101,7 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   }
 
   if (FALLBACK_LINK_LIMIT > 0) {
-    const fallbackLinks = extractUniqueLinks(crawlerTask.url, html)
+    const fallbackLinks = extractUniqueLinks(crawlerTask.url, html, dom)
       .filter(link => isHttpOrHttpsUrl(link) && !isBlockedUrl(link));
 
     for (const rawLink of fallbackLinks.slice(0, FALLBACK_LINK_LIMIT)) {

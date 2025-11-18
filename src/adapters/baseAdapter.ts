@@ -22,7 +22,7 @@ export abstract class BaseAdapter implements Adapter
     return 'outro' as PageType;
   }
 
-  abstract extract(html: string, url: string): ReturnType<Adapter['extract']>;
+  abstract extract(html: string, url: string, dom?: CheerioAPI): ReturnType<Adapter['extract']>;
 
   protected standardizeTeamName(extractedTeamName?: string | null): string | undefined 
   {
@@ -276,4 +276,3 @@ export abstract class BaseAdapter implements Adapter
     return candidates;
   }
 }
-

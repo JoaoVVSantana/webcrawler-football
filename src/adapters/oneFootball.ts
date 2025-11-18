@@ -18,12 +18,12 @@ export class OneFootballAdapter extends BaseAdapter {
     return super.classify(url);
   }
 
-  extract(html: string, url: string) {
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
     const nextDataMatches = this.parseMatchesFromNextData(html, url);
     const jsonLdMatches = this.extractSportsEventsFromJsonLd(html, url, 'OneFootball (json-ld)', 0.76);
     const matches = this.deduplicateMatches([...nextDataMatches, ...jsonLdMatches]);
 
-    const dom = cheerio.load(html);
+    const dom = domInstance ?? cheerio.load(html);
     const nextLinks = this.collectAllowedLinks(dom, url).filter(link =>
       /brasileirao|time|competicao|liga/i.test(link)
     );

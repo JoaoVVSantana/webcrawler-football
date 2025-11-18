@@ -17,12 +17,11 @@ export class GeTeamAgendaAdapter extends BaseAdapter {
     return /brasileirao-serie-a\/?$/i.test(url) ? 'agenda' : super.classify(url);
   }
 
-  extract(html: string, url: string) {
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
+    const dom = domInstance ?? cheerio.load(html);
     const inlineScheduleMatches = this.parseInlineScheduleMatches(html, url);
     const jsonLdMatches = inlineScheduleMatches.length ? [] : this.parseMatchesFromJsonLd(html, url);
-    const dom = cheerio.load(html);
     const htmlMatches = inlineScheduleMatches.length || jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
-
 
     const agendaLinksFromTeams = this.buildTeamAgendaLinks(dom, url);
 
@@ -199,7 +198,6 @@ export class GeTeamAgendaAdapter extends BaseAdapter {
     return Array.from(new Set(teamAgendaLinks));
   }
 }
-
 
 
 

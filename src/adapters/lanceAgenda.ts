@@ -22,10 +22,10 @@ export class LanceAgendaAdapter extends BaseAdapter {
     return super.classify(url);
   }
 
-  extract(html: string, url: string) {
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
     const stateMatches = this.parseMatchesFromInlineState(html, url);
     const jsonLdMatches = this.extractSportsEventsFromJsonLd(html, url, 'Lance (json-ld)', 0.78);
-    const dom = cheerio.load(html);
+    const dom = domInstance ?? cheerio.load(html);
     const htmlMatches =
       stateMatches.length || jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
 

@@ -14,9 +14,9 @@ export class EspnTeamAgendaAdapter extends BaseAdapter {
     return /\/competicao\/_/i.test(url) ? 'agenda' : super.classify(url);
   }
 
-  extract(html: string, url: string) {
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
     const jsonLdMatches = this.extractSportsEventsFromJsonLd(html, url, 'ESPN (json-ld)', 0.8);
-    const dom = cheerio.load(html);
+    const dom = domInstance ?? cheerio.load(html);
     const htmlMatches = jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
     const allowedLinks = this.collectAllowedLinks(dom, url);
     const matches = jsonLdMatches.length ? jsonLdMatches : htmlMatches;

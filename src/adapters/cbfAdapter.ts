@@ -22,18 +22,18 @@ export class CbfAdapter extends BaseAdapter {
     return 'outro';
   }
 
-  extract(html: string, url: string) {
-    const matches = this.extractMatches(html, url);
-    const nextLinks = this.extractLinks(html, url);
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
+    const dom = domInstance ?? cheerio.load(html);
+    const matches = this.extractMatches(dom, url);
+    const nextLinks = this.extractLinks(dom, url);
     
     // Extrair e armazenar dados específicos
-    this.extractAndStoreData(html, url);
+    this.extractAndStoreData(dom, url);
     
     return { matches, nextLinks };
   }
 
-  private extractMatches(html: string, url: string): MatchItem[] {
-    const dom = cheerio.load(html);
+  private extractMatches(dom: cheerio.CheerioAPI, url: string): MatchItem[] {
     const matches: MatchItem[] = [];
 
     // Extração de partidas da página de histórico
@@ -68,8 +68,7 @@ export class CbfAdapter extends BaseAdapter {
     return this.deduplicateMatches(matches);
   }
 
-  private extractLinks(html: string, baseUrl: string): string[] {
-    const dom = cheerio.load(html);
+  private extractLinks(dom: cheerio.CheerioAPI, baseUrl: string): string[] {
     const links = new Set<string>();
 
     // Links de times da tabela principal
@@ -118,8 +117,7 @@ export class CbfAdapter extends BaseAdapter {
     );
   }
 
-  private async extractAndStoreData(html: string, url: string) {
-    const dom = cheerio.load(html);
+  private async extractAndStoreData(dom: cheerio.CheerioAPI, url: string) {
     
     // Extrair jogadores da tab atletas
     if (url.includes('tab=atletas')) {

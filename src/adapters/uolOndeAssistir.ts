@@ -20,9 +20,9 @@ export class UolOndeAssistirAdapter extends BaseAdapter {
     return super.classify(url);
   }
 
-  extract(html: string, url: string) {
+  extract(html: string, url: string, domInstance?: cheerio.CheerioAPI) {
     const jsonLdMatches = this.extractSportsEventsFromJsonLd(html, url, 'UOL (json-ld)', 0.75);
-    const dom = cheerio.load(html);
+    const dom = domInstance ?? cheerio.load(html);
     const htmlMatches = jsonLdMatches.length ? [] : this.parseMatchesFromHtml(dom, url);
 
     const nextLinks = this.collectAllowedLinks(dom, url).filter(link =>
