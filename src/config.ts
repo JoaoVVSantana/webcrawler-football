@@ -2,6 +2,8 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 
+type FrontierStrategy = 'priority' | 'dfs';
+
 function parseNumberList(input: string | undefined, fallback: number[]): number[] {
   if (!input) return fallback;
   const values = input
@@ -61,10 +63,13 @@ if (process.env.SEEDS_FILE) {
 seedUrls = Array.from(new Set(seedUrls.filter(Boolean)));
 
 const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 240]);
+const normalizedFrontierStrategy = (process.env.CRAWLER_STRATEGY ?? 'priority').toLowerCase();
+const processedFrontierStrategy: FrontierStrategy = normalizedFrontierStrategy === 'dfs' ? 'dfs' : 'priority';
+const exploreAllLinks = (process.env.CRAWLER_PROCESS_ALL_LINKS ?? 'true').toLowerCase() === 'true';
 
 export const CRAWLER_CONFIG = {
-  globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 6),
-  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 3),
+  globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 8),
+  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 4),
   requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 15000),
   seeds: seedUrls,
   respectRobots: (process.env.RESPECT_ROBOTS ?? 'true').toLowerCase() === 'true',
@@ -73,6 +78,9 @@ export const CRAWLER_CONFIG = {
   languageHeader: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
   maxRuntimeMs: Number(process.env.MAX_RUNTIME_MINUTES ?? 0) * 60_000,
   fallbackLinkLimit: Number(process.env.FALLBACK_LINK_LIMIT ?? 18),
+  processAllLinksFromPage: exploreAllLinks,
+  maxDepth: Number(process.env.MAX_DEPTH ?? 10),
+  frontierStrategy: processedFrontierStrategy,
   index: {
     chunkSizes: defaultChunkSizes,
     primaryChunkSize: defaultChunkSizes[0],

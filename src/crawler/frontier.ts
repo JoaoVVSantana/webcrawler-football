@@ -2,6 +2,8 @@ import { canonicalizeUrl } from '../utils/url';
 import { isBlockedUrl } from '../utils/urlFilters';
 import type { CrawlTask } from '../types';
 
+type FrontierStrategy = 'priority' | 'dfs';
+
 function resolvePriority(task: CrawlTask): number {
   return task.priority ?? 0;
 }
@@ -11,11 +13,22 @@ export interface FrontierSerializedState {
   visited: string[];
 }
 
+export interface CrawlFrontierOptions {
+  maxDepth?: number;
+  strategy?: FrontierStrategy;
+}
+
 export class CrawlFrontier {
-  private readonly maxDepth = Number(process.env.MAX_DEPTH ?? 3);
+  private readonly maxDepth: number;
+  private readonly strategy: FrontierStrategy;
   private queue: CrawlTask[] = [];
   private queuedUrls = new Set<string>();
   private visitedUrls = new Set<string>();
+
+  constructor(options: CrawlFrontierOptions = {}) {
+    this.maxDepth = typeof options.maxDepth === 'number' ? options.maxDepth : Number(process.env.MAX_DEPTH ?? 3);
+    this.strategy = options.strategy === 'dfs' ? 'dfs' : 'priority';
+  }
 
   size(): number {
     return this.queue.length;
@@ -49,11 +62,16 @@ export class CrawlFrontier {
   pop(): CrawlTask | undefined {
     if (this.queue.length === 0) return undefined;
 
-    const nextTask = this.queue[0];
-    const lastTask = this.queue.pop();
-    if (this.queue.length > 0 && lastTask) {
-      this.queue[0] = lastTask;
-      this.heapifyDown(0);
+    let nextTask: CrawlTask | undefined;
+    if (this.strategy === 'dfs') {
+      nextTask = this.queue.pop();
+    } else {
+      nextTask = this.queue[0];
+      const lastTask = this.queue.pop();
+      if (this.queue.length > 0 && lastTask) {
+        this.queue[0] = lastTask;
+        this.heapifyDown(0);
+      }
     }
 
     if (nextTask) {
@@ -89,7 +107,9 @@ export class CrawlFrontier {
     }
 
     this.queue = restoredQueue;
-    this.heapifyAll();
+    if (this.strategy === 'priority') {
+      this.heapifyAll();
+    }
     this.queuedUrls = restoredQueued;
     this.visitedUrls = new Set(
       (state.visited ?? []).map(url => canonicalizeUrl(url)).filter(url => !isBlockedUrl(url))
@@ -104,7 +124,9 @@ export class CrawlFrontier {
 
   private enqueue(task: CrawlTask): void {
     this.queue.push(task);
-    this.heapifyUp(this.queue.length - 1);
+    if (this.strategy === 'priority') {
+      this.heapifyUp(this.queue.length - 1);
+    }
   }
 
   private heapifyUp(index: number): void {

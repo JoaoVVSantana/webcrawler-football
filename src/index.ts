@@ -11,6 +11,7 @@ import { isBlockedUrl } from './utils/urlFilters';
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const MAX_LINKS_PER_PAGE = Math.max(0, CRAWLER_CONFIG.fallbackLinkLimit ?? 0);
+const PROCESS_ALL_LINKS = CRAWLER_CONFIG.processAllLinksFromPage !== false;
 const INITIAL_PRIORITY = 100;
 const PRIORITY_DECAY = 1;
 
@@ -32,7 +33,9 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   );
 
   const nextPriority = (crawlerTask.priority ?? INITIAL_PRIORITY) - PRIORITY_DECAY;
-  const linksToEnqueue = MAX_LINKS_PER_PAGE > 0 ? outgoingLinks.slice(0, MAX_LINKS_PER_PAGE) : outgoingLinks;
+  const shouldLimitLinks = MAX_LINKS_PER_PAGE > 0;
+  const linksToEnqueue = shouldLimitLinks ? outgoingLinks.slice(0, MAX_LINKS_PER_PAGE) : outgoingLinks;
+  const deferredLinks = shouldLimitLinks ? outgoingLinks.slice(MAX_LINKS_PER_PAGE) : [];
 
   for (const link of linksToEnqueue) {
     try {
@@ -45,6 +48,20 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
       // ignore malformed URLs
     }
   }
+
+  if (PROCESS_ALL_LINKS && deferredLinks.length > 0) {
+    deferredLinks.forEach((link, index) => {
+      try {
+        frontier.pushIfAbsent({
+          url: link,
+          depth: (crawlerTask.depth ?? 0) + 1,
+          priority: nextPriority - (index + 1) * PRIORITY_DECAY
+        });
+      } catch {
+        // ignore malformed URLs
+      }
+    });
+  }
 }
 
 async function main() {
@@ -56,7 +73,10 @@ async function main() {
   const startTime = new Date().toISOString();
   const startTimestamp = Date.now();
   console.log({ seeds: CRAWLER_CONFIG.seeds }, 'Iniciando crawler');
-  const frontier = new CrawlFrontier();
+  const frontier = new CrawlFrontier({
+    maxDepth: CRAWLER_CONFIG.maxDepth,
+    strategy: CRAWLER_CONFIG.frontierStrategy
+  });
 
   for (const seed of CRAWLER_CONFIG.seeds) {
     frontier.push({ url: seed, depth: 0, priority: INITIAL_PRIORITY });
