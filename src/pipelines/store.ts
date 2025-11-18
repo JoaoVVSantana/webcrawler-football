@@ -36,7 +36,7 @@ export async function persistDocumentMetadata(record: DocumentRecord) {
   getInvertedIndexBuilder().addDocument(record);
 }
 
-export async function persistMatches(matches: MatchItem[]) {
+export function persistMatches(matches: MatchItem[]) {
   for (const match of matches) {
     //console.log({ home: match.homeTeam, away: match.awayTeam, when: match.dateTimeLocal, watch: match.whereToWatch?.[0]?.provider }, 'MATCH');
   }

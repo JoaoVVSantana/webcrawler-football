@@ -4,7 +4,6 @@ import { CrawlFrontier } from './crawler/frontier';
 import { fetchHtml } from './crawler/fetcher';
 import { createDocumentMetadata, extractUniqueLinks } from './crawler/extractor';
 import { isHttpOrHttpsUrl } from './utils/url';
-import { persistDocumentMetadata, persistMatches } from './pipelines/store';
 import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
 import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
 import { CbfAdapter } from './adapters/cbfAdapter';
@@ -13,11 +12,10 @@ import { LanceAgendaAdapter } from './adapters/lanceAgenda';
 import { OneFootballAdapter } from './adapters/oneFootball';
 import { GenericSportsNewsAdapter } from './adapters/genericSportsNews';
 import { Adapter, CrawlTask, PageType } from './types';
-import { appendMatchesToCsv } from './pipelines/csvStore';
+import { scheduleDocumentPersist, scheduleMatchesPersist, flushPipelineQueues } from './pipelines/pipelineQueue';
 import { saveMetrics } from './utils/metrics';
 import { finalizeInvertedIndex } from './indexing/invertedIndex';
 import { isBlockedUrl } from './utils/urlFilters';
-import { loadFrontierSnapshot, saveFrontierSnapshot } from './crawler/stateStore';
 
 const adapters: Adapter[] = [
   new GeTeamAgendaAdapter(),
@@ -67,13 +65,12 @@ async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier)
   const documentRecord = createDocumentMetadata(crawlerTask.url, html, pageType, dom);
   documentRecord.metadata.status = response.statusCode;
 
-  await persistDocumentMetadata(documentRecord);
+  scheduleDocumentPersist(documentRecord);
   if (selectedAdapter) {
 
     const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url, dom);
     if (matches.length) {
-      await persistMatches(matches);
-      await appendMatchesToCsv(matches);
+      scheduleMatchesPersist(matches);
     }
 
     if (nextLinks.length) {
@@ -132,45 +129,8 @@ async function main() {
   console.log({ seeds: CRAWLER_CONFIG.seeds }, 'Iniciando crawler');
   const frontier = new CrawlFrontier();
 
-  const snapshotPath = CRAWLER_CONFIG.frontierSnapshotPath;
-  const snapshotInterval = Math.max(0, CRAWLER_CONFIG.frontierSnapshotIntervalMs ?? 0);
-  let lastSnapshotAt = Date.now();
-  let isSavingSnapshot = false;
-
-  if (CRAWLER_CONFIG.resumeFrontier) {
-    const snapshot = loadFrontierSnapshot(snapshotPath);
-    if (snapshot) {
-      frontier.restore({ queue: snapshot.queue, visited: snapshot.visited });
-      console.log(
-        { restoredQueue: frontier.size(), restoredVisited: frontier.visitedCount() },
-        'Frontier restaurada de snapshot'
-      );
-    }
-  }
-
   for (const seed of CRAWLER_CONFIG.seeds) {
     frontier.push({ url: seed, depth: 0, priority: 100 });
-  }
-
-  async function maybeSnapshot(force = false) {
-    if (!CRAWLER_CONFIG.resumeFrontier) return;
-    if (!snapshotPath) return;
-    const now = Date.now();
-    if (!force && snapshotInterval <= 0) return;
-    if (!force && snapshotInterval > 0 && now - lastSnapshotAt < snapshotInterval) return;
-    if (isSavingSnapshot) return;
-    isSavingSnapshot = true;
-    try {
-      const state = frontier.serialize();
-      await saveFrontierSnapshot(snapshotPath, {
-        queue: state.queue,
-        visited: state.visited,
-        createdAt: new Date().toISOString()
-      });
-      lastSnapshotAt = now;
-    } finally {
-      isSavingSnapshot = false;
-    }
   }
 
   const statistics = {
@@ -237,14 +197,13 @@ async function main() {
           stopRequested = true;
           stopReason = stopReason ?? 'max_pages';
         }
-        await maybeSnapshot(false);
       }
     }
   }
 
   const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
   await Promise.all(workers);
-  await maybeSnapshot(true);
+  await flushPipelineQueues();
 
   const endTime = new Date().toISOString();
   console.log(
@@ -270,8 +229,9 @@ async function main() {
   finalizeInvertedIndex();
 }
 
-main().catch(err => {
+main().catch(async err => {
   console.log({ err }, 'Erro fatal');
+  await flushPipelineQueues();
   finalizeInvertedIndex();
   process.exit(1);
 });

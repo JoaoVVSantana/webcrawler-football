@@ -64,17 +64,13 @@ const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 2
 
 export const CRAWLER_CONFIG = {
   globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 6),
-  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 1),
+  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 3),
   requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 15000),
   seeds: seedUrls,
   respectRobots: (process.env.RESPECT_ROBOTS ?? 'true').toLowerCase() === 'true',
   userAgentHeader: process.env.CRAWLER_USER_AGENT ?? 'CrawlerBrasileirao/0.1',
   acceptHeader: 'text/html,application/xhtml+xml',
   languageHeader: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  resumeFrontier: (process.env.FRONTIER_RESUME ?? 'true').toLowerCase() === 'true',
-  frontierSnapshotPath:
-    process.env.FRONTIER_SNAPSHOT_PATH ?? path.join(process.cwd(), 'result', 'frontier-state.json'),
-  frontierSnapshotIntervalMs: Number(process.env.FRONTIER_SNAPSHOT_INTERVAL_MS ?? 60000),
   maxRuntimeMs: Number(process.env.MAX_RUNTIME_MINUTES ?? 0) * 60_000,
   fallbackLinkLimit: Number(process.env.FALLBACK_LINK_LIMIT ?? 18),
   index: {
