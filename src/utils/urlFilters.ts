@@ -32,7 +32,10 @@ const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /(^|\.)discordapp\.com$/i,
   /(^|\.)suporte\./i,
   /(^|\.)support\./i,
-  /(^|\.)help\./i
+  /(^|\.)help\./i,
+  /(^|\.)nba\./i,
+  /(^|\.)ufc\./i
+
 ];
 
 const BLOCKED_PATH_PATTERNS: RegExp[] = [

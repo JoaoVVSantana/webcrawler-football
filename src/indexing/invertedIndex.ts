@@ -95,6 +95,10 @@ class InvertedIndexBuilder {
   }
 
   finalize(): void {
+    this.persistToDisk();
+  }
+
+  persistToDisk(): void {
     if (!this.documents.size) return;
     fs.mkdirSync(this.indexDir, { recursive: true });
 
@@ -233,4 +237,9 @@ export function getInvertedIndexBuilder(): InvertedIndexBuilder {
 export function finalizeInvertedIndex(): void {
   if (!singletonBuilder) return;
   singletonBuilder.finalize();
+}
+
+export function snapshotInvertedIndex(): void {
+  if (!singletonBuilder) return;
+  singletonBuilder.persistToDisk();
 }

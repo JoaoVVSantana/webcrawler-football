@@ -15,10 +15,15 @@ const PROCESS_ALL_LINKS = CRAWLER_CONFIG.processAllLinksFromPage !== false;
 const INITIAL_PRIORITY = 100;
 const PRIORITY_DECAY = 1;
 
-async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier, workerId: number): Promise<void> {
+async function processCrawlTask(
+  crawlerTask: CrawlTask,
+  frontier: CrawlFrontier,
+  workerId: number,
+  signal?: AbortSignal
+): Promise<void> {
   if (isBlockedUrl(crawlerTask.url)) return;
 
-  const response = await fetchHtml(crawlerTask.url, workerId);
+  const response = await fetchHtml(crawlerTask.url, workerId, signal);
   if (!response) return;
 
   const html = response.body;
@@ -93,19 +98,50 @@ async function main() {
   let stopRequested = false;
   let stopReason: string | null = null;
   let activeFetches = 0;
+  const activeControllers = new Map<number, AbortController>();
+
+  function cancelActiveFetches(): void {
+    activeControllers.forEach(controller => controller.abort());
+    activeControllers.clear();
+  }
+
+  function requestStop(reason: string) {
+    const wasRequested = stopRequested;
+    stopRequested = true;
+    stopReason = stopReason ?? reason;
+    if (!wasRequested) {
+      cancelActiveFetches();
+    }
+  }
+
+  const cleanupHandlers: Array<() => void> = [];
+
+  function assembleMetrics() {
+    const endTime = new Date().toISOString();
+    const durationSeconds = Math.max(1, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000);
+    const pagesPerSecond = statistics.processed / durationSeconds;
+    return {
+      startTime,
+      endTime,
+      pagesProcessed: statistics.processed,
+      matchesFound: statistics.matchesFound,
+      errorCount: statistics.errorCount,
+      pagesPerSecond,
+      sourceBreakdown,
+      stopReason: stopReason ?? undefined
+    };
+  }
 
   async function worker(workerId: number) {
     let emptyCycles = 0;
     while (true) {
       if (stopRequested) break;
       if (CRAWLER_CONFIG.maxRuntimeMs > 0 && Date.now() - startTimestamp >= CRAWLER_CONFIG.maxRuntimeMs) {
-        stopRequested = true;
-        stopReason = stopReason ?? 'runtime_limit';
+        requestStop('runtime_limit');
         break;
       }
       if (statistics.processed >= maxPagesToProcess) {
-        stopRequested = true;
-        stopReason = stopReason ?? 'max_pages';
+        requestStop('max_pages');
         break;
       }
 
@@ -125,8 +161,7 @@ async function main() {
         }
         if (stopRequested) break;
         if (activeFetches === 0 && frontier.size() === 0) {
-          stopRequested = true;
-          stopReason = stopReason ?? 'frontier_empty';
+          requestStop('frontier_empty');
           break;
         }
         await sleep(5);
@@ -135,6 +170,8 @@ async function main() {
       emptyCycles = 0;
 
       activeFetches++;
+      const controller = new AbortController();
+      activeControllers.set(workerId, controller);
       try {
         console.log(
           {
@@ -146,7 +183,7 @@ async function main() {
           'Processando'
         );
 
-        await processCrawlTask(task, frontier, workerId);
+        await processCrawlTask(task, frontier, workerId, controller.signal);
         const domain = new URL(task.url).hostname;
         sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
       } catch (e: any) {
@@ -155,48 +192,77 @@ async function main() {
       } finally {
         activeFetches--;
         statistics.processed++;
+        activeControllers.delete(workerId);
         if (statistics.processed >= maxPagesToProcess) {
-          stopRequested = true;
-          stopReason = stopReason ?? 'max_pages';
+          requestStop('max_pages');
         }
       }
     }
   }
 
   const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
-  await Promise.all(workers);
-  await flushPipelineQueues();
-  await shutdownDocumentPipeline();
+  const workersPromise = Promise.all(workers);
+  let finalizationPromise: Promise<void> | null = null;
 
-  const endTime = new Date().toISOString();
-  const durationSeconds = Math.max(1, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000);
-  const pagesPerSecond = statistics.processed / durationSeconds;
-  console.log(
-    {
-      processed: statistics.processed,
-      matchesFound: statistics.matchesFound,
-      errorCount: statistics.errorCount,
-      visited: frontier.visitedCount(),
-      stopReason
-    },
-    'Crawler finalizado'
-  );
-  
-  saveMetrics({
-    startTime,
-    endTime,
-    pagesProcessed: statistics.processed,
-    matchesFound: statistics.matchesFound,
-    errorCount: statistics.errorCount,
-    pagesPerSecond,
-    sourceBreakdown,
-    stopReason: stopReason ?? undefined
+  const finalizeRun = (reason?: string): Promise<void> => {
+    if (finalizationPromise) return finalizationPromise;
+    finalizationPromise = (async () => {
+      if (reason) requestStop(reason);
+      try {
+        await workersPromise;
+      } catch (err) {
+        console.error({ err }, 'Erro ao aguardar workers');
+        requestStop('worker_error');
+      } finally {
+        for (const dispose of cleanupHandlers) dispose();
+      }
+
+      try {
+        await flushPipelineQueues();
+      } catch (err) {
+        console.error({ err }, 'Falha ao esvaziar pipelines');
+      }
+
+      try {
+        await shutdownDocumentPipeline();
+      } catch (err) {
+        console.error({ err }, 'Falha ao encerrar pipeline de documentos');
+      }
+
+      const metricsPayload = assembleMetrics();
+      try {
+        saveMetrics(metricsPayload);
+      } catch (err) {
+        console.error({ err }, 'Falha ao salvar métricas');
+      }
+
+      console.log(
+        {
+          ...metricsPayload,
+          visited: frontier.visitedCount()
+        },
+        'Crawler finalizado'
+      );
+    })();
+    return finalizationPromise;
+  };
+
+  const handleSignal = (signal: NodeJS.Signals) => {
+    console.log({ signal }, 'Sinal recebido, finalizando crawler...');
+    finalizeRun('manual_stop').finally(() => process.exit(0));
+  };
+
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
+  cleanupHandlers.push(() => {
+    process.off('SIGINT', handleSignal);
+    process.off('SIGTERM', handleSignal);
   });
+
+  await finalizeRun();
 }
 
 main().catch(async err => {
   console.log({ err }, 'Erro fatal');
-  await flushPipelineQueues();
-  await shutdownDocumentPipeline();
   process.exit(1);
 });

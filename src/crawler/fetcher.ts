@@ -61,7 +61,7 @@ function isSoft404Response(html: string) {
   );
 }
 
-export async function fetchHtml(url: string, workerId?: number): Promise<Response<string> | null> {
+export async function fetchHtml(url: string, workerId?: number, signal?: AbortSignal): Promise<Response<string> | null> {
   const parsedUrl = new URL(url);
   const origin = parsedUrl.origin;      
   const hostname = parsedUrl.hostname;
@@ -97,7 +97,8 @@ export async function fetchHtml(url: string, workerId?: number): Promise<Respons
         http2: true,
         decompress: true,
         throwHttpErrors: false,
-        followRedirect: true
+        followRedirect: true,
+        signal
       });
       const responseByteLength = (response.rawBody as any)?.length ?? 0;
       //console.log({ status: res.statusCode, bytes: responseByteLength }, 'RESP');
@@ -127,7 +128,11 @@ export async function fetchHtml(url: string, workerId?: number): Promise<Respons
     } 
     catch (e: any) 
     {
-      console.log({ url, err: e?.message }, 'Erro fetch');
+      if (e?.name === 'AbortError') {
+        console.log({ url }, 'Fetch abortado');
+      } else {
+        console.log({ url, err: e?.message }, 'Erro fetch');
+      }
       return null;
     }
   });

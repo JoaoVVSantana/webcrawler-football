@@ -1,12 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { DocumentRecord } from '../types';
-import { getInvertedIndexBuilder } from '../indexing/invertedIndex';
+import { getInvertedIndexBuilder, snapshotInvertedIndex } from '../indexing/invertedIndex';
 
 const documentsFile = path.join(process.cwd(), 'result', 'documents.jsonl');
 const documentsDir = path.dirname(documentsFile);
 
 let writeStream: fs.WriteStream | null = null;
+const SNAPSHOT_INTERVAL = Math.max(50, Number(process.env.INDEX_SNAPSHOT_INTERVAL ?? 500));
+let documentsSinceSnapshot = 0;
 
 function ensureStream(): fs.WriteStream {
   if (!writeStream) {
@@ -47,6 +49,11 @@ async function appendDocumentSummary(record: DocumentRecord) {
 export async function persistDocumentMetadata(record: DocumentRecord) {
   await appendDocumentSummary(record);
   getInvertedIndexBuilder().addDocument(record);
+  documentsSinceSnapshot++;
+  if (documentsSinceSnapshot >= SNAPSHOT_INTERVAL) {
+    snapshotInvertedIndex();
+    documentsSinceSnapshot = 0;
+  }
 }
 
 export function closeDocumentStream(): Promise<void> {
