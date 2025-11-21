@@ -1,144 +1,59 @@
-# 🎨 Frontend TypeScript - BrasileiraoFinder
+# ⚽ Frontend React + TypeScript
 
-Frontend moderno em TypeScript para o sistema de busca de futebol brasileiro.
+Interface do **BrasileirãoFinder** reescrita em React com TypeScript e Vite, mantendo o visual original e adicionando uma base moderna para evoluções futuras.
 
-## 🚀 Tecnologias
+## 🚀 Scripts
 
-- **TypeScript** - Tipagem estática
-- **ES Modules** - Módulos nativos
-- **CSS3** - Gradientes e backdrop-filter
-- **Express** - Servidor de desenvolvimento
-- **Fetch API** - Comunicação com API
+Dentro da pasta `frontend/`:
 
-## 📁 Estrutura
+```bash
+npm install        # Instala dependências
+npm run dev        # Ambiente de desenvolvimento (http://localhost:5173)
+npm run build      # Gera versão de produção em dist/
+npm run preview    # Serve a build para testes locais
+```
+
+> Para manter compatibilidade, ainda é possível usar `npm run frontend` a partir da raiz do repositório – agora o script executa `npm --prefix frontend run dev`.
+
+## 🔌 Configuração da API
+
+Por padrão o frontend chama `http://localhost:3001`. Para apontar para outro host defina uma variável em `.env`:
+
+```bash
+VITE_API_BASE="https://meu-servidor:3001"
+```
+
+## 🧱 Estrutura
 
 ```
 frontend/
+├── public/ball.svg           # Ícone da página
 ├── src/
-│   ├── types.ts      # Interfaces TypeScript
-│   ├── api.ts        # Cliente da API
-│   ├── components.ts # Componentes UI
-│   ├── app.ts        # Aplicação principal
-│   └── styles.css    # Estilos modernos
-├── index.html        # HTML principal
-├── server.ts         # Servidor Express
-└── tsconfig.json     # Config TypeScript
+│   ├── api/searchApi.ts      # Cliente da API
+│   ├── components/           # Componentes React
+│   ├── types/search.ts       # Tipos compartilhados
+│   ├── App.tsx               # Página principal
+│   └── styles.css            # Estilos originais preservados
+├── index.html                # Entrada Vite
+├── package.json
+└── vite.config.ts
 ```
 
-## 🎯 Funcionalidades
+## 🧩 Componentes principais
 
-### ✨ Interface Moderna
-- Design responsivo com gradientes
-- Componentes reutilizáveis
-- Animações suaves
-- Tema futebol (verde/azul Brasil)
+- `ThemeToggle` – Alternância claro/escuro com persistência no `localStorage`.
+- `SearchForm` – Campo de busca com filtros e debounce integrado.
+- `PopularSearches` – Atalhos configurados para pesquisas recorrentes.
+- `ResultsSection`/`ResultCard` – Renderização dos resultados, estados de loading, erro e vazio.
 
-### 🔍 Busca Inteligente
-- Busca em tempo real (debounce 500ms)
-- Filtros por tipo de página
-- Tags populares clicáveis
-- Resultados com score TF-IDF
+Todas as classes CSS originais foram mantidas para preservar o visual, animações e responsividade.
 
-### 📱 Responsivo
-- Mobile-first design
-- Breakpoints otimizados
-- Touch-friendly buttons
-- Layouts flexíveis
+## ✅ Fluxo de desenvolvimento
 
-## 🛠️ Como Usar
-
-### 1. Iniciar API (Terminal 1)
-```bash
-npm run search-api
-```
-
-### 2. Iniciar Frontend (Terminal 2)
-```bash
-npm run frontend
-```
-
-### 3. Acessar
-```
-http://localhost:3000
-```
-
-## 🎨 Componentes
-
-### SearchComponents
-- `createSearchForm()` - Formulário de busca
-- `createPopularSearches()` - Tags populares
-- `createResultCard()` - Card de resultado
-- `createLoadingSpinner()` - Loading animado
-- `createErrorMessage()` - Mensagens de erro
-
-### SearchAPI
-- `search()` - Buscar na API
-- `health()` - Verificar status da API
-
-### BrasileiraoFinderApp
-- Gerenciamento de estado
-- Event listeners
-- Debounce de busca
-- Renderização de resultados
-
-## 🎯 Tipos TypeScript
-
-```typescript
-interface SearchResult {
-  docId: string;
-  url: string;
-  title: string;
-  score: number;
-  snippet: string;
-  fetchedAt: string;
-  pageType: string;
-}
-
-interface SearchFilters {
-  pageType?: string;
-  limit?: number;
-  minScore?: number;
-}
-```
-
-## 🎨 Design System
-
-### Cores
-- **Primária**: `#1e3c72` (Azul Brasil)
-- **Secundária**: `#28a745` (Verde Brasil)
-- **Accent**: `#ffc107` (Amarelo)
-- **Background**: Gradiente azul
-
-### Tipografia
-- **Font**: Segoe UI, Tahoma, Geneva
-- **Títulos**: 700 weight
-- **Corpo**: 400 weight
-- **Tamanhos**: 0.8rem - 2.5rem
-
-### Componentes
-- **Cards**: backdrop-filter blur
-- **Buttons**: gradientes + hover effects
-- **Inputs**: border-radius 50px
-- **Shadows**: múltiplas camadas
-
-## 🔧 Desenvolvimento
-
-### Compilação TypeScript
-O servidor Express compila TS em tempo real durante desenvolvimento.
-
-### Hot Reload
-Reinicie o servidor para mudanças no TypeScript.
-
-### Produção
-Para produção, use um bundler como Vite ou Webpack.
-
-## 📊 Performance
-
-- **Debounce**: 500ms para busca
-- **Lazy Loading**: Componentes sob demanda
-- **CSS Optimizado**: Seletores eficientes
-- **Fetch Caching**: Headers apropriados
+1. `npm run search-api` na raiz para iniciar o backend.
+2. `npm run dev` dentro de `frontend/` (ou `npm run frontend` na raiz) para subir o React.
+3. Acesse `http://localhost:5173` e realize as buscas.
 
 ---
 
-**⚽ Frontend TypeScript completo para o BrasileiraoFinder!**
+**🇧🇷 BrasileirãoFinder – Sistema de RI | PUC**

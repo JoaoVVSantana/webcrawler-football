@@ -141,3 +141,5 @@ vite.config.ts.timestamp-*
 
 
 result
+frontend/public/team-logos/*.png
+!frontend/public/team-logos/.gitkeep
