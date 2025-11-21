@@ -1,325 +1,64 @@
 # webcrawler-football
 
-## Proposta do Sistema de RI
-1) Problema e Motivação
+Crawler e motor de busca voltados para páginas de futebol brasileiro (Série A). O código atual faz coleta genérica de HTML, processa texto para um índice invertido e expõe APIs de busca e de agenda oficial (ge.globo).
+
+## Visão geral e estado atual (nov/2025)
+- Crawler genérico: visita seeds e links subsequentes (HTTP/HTTPS), normaliza texto e grava metadados em `result/documents.jsonl`.
+- Indexação invertida incremental durante a coleta em `result/index/inverted-index.json` (chunks configuráveis, snapshots periódicos).
+- Frontier configurável (priority/bfs/dfs), deduplica URLs, respeita robots.txt e limita RPS por host via Bottleneck.
+- API Express em `src/api/server.ts`: `/search`, `/matches`, `/matches/teams`, `/logos`, `/status`, `/health`. O endpoint de partidas usa apenas a agenda oficial do ge.globo (sem merge com outras fontes).
+- Motor de busca BM25 em memória (`SearchEngine`) com stems PT-BR, sinônimos, boost por domínio confiável e cobertura de título/URL.
+- Não há adaptadores específicos, dedup de partidas ou persistência em bancos (PostgreSQL/Elasticsearch); esses pontos seguem como TODO.
+
+## Como rodar rápido
+1. `npm install`
+2. Configure `.env` com `SEEDS` (ou deixe os arquivos `seeds/*.json` serem carregados automaticamente).
+3. Crawler: `npm run start` (ou `npm run dev` para watch). Controla `MAX_PAGES`, `MAX_RUNTIME_MINUTES`, `GLOBAL_MAX_CONCURRENCY`, `MAX_DEPTH`.
+4. API de busca/agenda: `npm run search-api` (porta padrão 3001). Teste em `http://localhost:3001/search?q=flamengo`.
+5. Frontend Vite: `npm run frontend` (usa `VITE_API_BASE`, padrão `http://localhost:3001`).
+6. Reconstruir índice a partir de `result/documents.jsonl`: `npm run rebuild-index`.
+
+## Coleta e frontier
+- Seeds: vindas de `.env` (`SEEDS`), `SEEDS_FILE` ou de todos os `.json` em `seeds/`.
+- Frontier: heap de prioridade por padrão; também aceita `CRAWLER_STRATEGY=dfs|bfs`. Deduplica URLs visitadas/em fila e corta hosts/paths/extensões indesejados (`src/utils/urlFilters.ts`).
+- Politeness: `GLOBAL_MAX_CONCURRENCY` (default 15) workers em paralelo; `PER_DOMAIN_RPS` controla RPS por host; respeita robots.txt quando `RESPECT_ROBOTS=true`.
+- Fetcher: HTTP/2 habilitado, timeouts via `REQUEST_TIMEOUT_MS`, descarta content-type não HTML e soft-404. Não há retries além do comportamento padrão do `got`.
+- Parada: `MAX_PAGES` (default 60000), `MAX_RUNTIME_MINUTES` (0 = ilimitado) e `MAX_DEPTH`. Encerra quando não há tarefas na frontier.
+- Persistência: cada página gera hash SHA-256, status HTTP, título, tamanho, estatísticas lexicais e é gravada em `result/documents.jsonl`; o índice é atualizado no worker thread (snapshot a cada `INDEX_SNAPSHOT_INTERVAL`, default 500 docs).
+
+## Indexação e texto
+- Limpeza lexical (`src/utils/textProcessing.ts`): remove scripts/iframes, minúsculas, sem acentos, tokens mínimos (`INDEX_MIN_TOKEN_LENGTH`, default 3), stopwords PT-BR removidas, stemming `PorterStemmerPt`.
+- Dados gravados: `result/documents.jsonl` (um JSON por linha com metadados e resumo lexical) e `result/index/index-metadata.json` (estatísticas de indexação).
+- Índice: `inverted-index.json` armazena vocabulário, postings `(docId, chunkId, tf)` e configuração (`INDEX_CHUNK_SIZES`, `INDEX_MAX_TOKENS`, `INDEX_GRANULARITY` informativo).
+- Rebuild: `npm run rebuild-index` lê `documents.jsonl` e refaz o índice usando o pipeline de texto.
+
+## Busca e API
+- Engine (`src/search/searchEngine.ts`): normaliza consulta, expande sinônimos (`agenda/calendario`, `assistir/onde/streaming`, etc.), computa BM25 e aplica boosts de domínio confiável, cobertura em título/URL e fator de match de times (keywords em `FOOTBALL_KEYWORDS`).
+- Endpoints da API (`src/api/server.ts`):
+  - `GET /search?q=...&limit=&minScore=`: busca full-text em memória (inverte o índice carregado em startup).
+  - `GET /matches?team=...&limit=`: agenda oficial do ge.globo para os próximos ~14 dias.
+  - `GET /matches/teams`: lista de times suportados pela agenda.
+  - `GET /logos?src=`: proxy simples para logos externas.
+  - `GET /status` / `GET /health`: verificação rápida.
+- Métricas básicas da execução do crawler ficam em `result/crawl-metrics.json`.
+
+## Frontend
+- `frontend/` (Vite/React) oferece busca e agenda por time. Espera a API em `VITE_API_BASE` (default `http://localhost:3001`). Rodar com `npm run frontend`.
+
+## Seeds
+- `seeds/serieA_2025.json`, `all_seeds.json`, `team_*` fornecem conjuntos prontos (portais, clubes, torcida, etc.). Você pode apontar para um arquivo específico via `SEEDS_FILE` ou confiar no carregamento automático de todos os `.json`.
+
+## Limitações e itens não implementados
+- Não há adaptadores/extração de partidas nem enriquecimento de transmissões; apenas metadados das páginas são salvos.
+- Não existe snapshot/recover da frontier entre execuções (mencionado em versões antigas).
+- Sem banco de dados ou Elasticsearch; tudo é arquivo local.
+- Sem Prometheus/Grafana; apenas métricas básicas em JSON e logs no console.
+- Script `npm run test-search` aponta para `src/search/testSearch.ts`, que não existe atualmente.
+
+## Scripts úteis (package.json)
+- `start` / `dev` – crawler
+- `search-api` – API Express de busca/agenda
+- `frontend` – frontend Vite
+- `rebuild-index` – reconstrói o índice a partir do JSONL
+- `lint` / `build` – utilidades de qualidade/compilação
 
-Torcedores precisam saber quando e onde assistir aos jogos dos times da Série A do Brasileirão, mas essa informação costuma estar fragmentada (sites de clubes, federações, mídia esportiva, plataformas de streaming e TV). A proposta é construir um crawler vertical especializado em futebol brasileiro (Série A) para coletar e unificar dados de partidas futuras e suas transmissões em um índice pesquisável.
-
-2) Objetivo
-
-Coletar, normalizar e disponibilizar consultas sobre:
-
-- Time mandante/visitante
-
-- Adversário
-
-- Data e horário (com fuso correto)
-
-- Onde assistir (TV aberta/fechada, streaming, YouTube) e link quando aplicável
-
-Consultas-alvo (exemplos):
-
-- “Próximo jogo do Cruzeiro e onde assistir”
-
-- “Jogos do Flamengo nesta semana em streaming”
-
-- “Transmissões no YouTube no mês que vem”
-
-3) Escopo e Fontes
-
-Fontes planejadas (prioridade alta = fornecem dados mais estruturados e estáveis):
-
-Sites oficiais dos clubes da Série A (páginas de agenda/calendário; ex.: “Próximo jogo”, “Partidas”).
-
-Plataformas de mídia/guia de programação (p. ex. páginas “onde assistir” e grades de transmissão).
-
-Federações/Liga (tabelas e rodadas; p. ex. CBF/Liga Forte/Brasileirão quando aplicável).
-
-Portais esportivos (p. ex. páginas de “tabela/rodada” e “agenda de jogos”).
-
-RSS/Sitemaps quando houver.
-
-Nota de escala (50k+ páginas): além das páginas de partidas, o sistema coletará também notícias/artigos relacionados às rodadas e páginas de histórico (mesmo contendo metadados redundantes). Para a avaliação, contam “itens coletados”; o índice poderá armazenar tanto fixtures (dados estruturados) quanto documentos (páginas texto) para atingir a escala.
-
-4) Arquitetura de Alto Nível (RI)
-
-Crawler vertical (Focused Crawler) com adaptadores por fonte.
-
-- Extrator: parser de HTML/JSON-LD/Schema.org + heurísticas para datas/horários e blocos “onde assistir”.
-
-- Normalizador:
-
-  - times ⇢ dicionário controlado (ID, nomes alternativos: “Atlético-MG”, “Atlético Mineiro”, “CAM”)
-
-  - datas ⇢ UTC + America/Sao_Paulo
-
-  - transmissões ⇢ enum {tv_aberta, tv_fechada, streaming, youtube} + provider_name + url
-
-  - Deduplicação por (teamA, teamB, datetime, competição) com tolerância de 15 min.
-
-- Armazenamento:
-
-  - Banco relacional (PostgreSQL) para consistência dos jogos. Ou salvamento em CSV file -> TODO
-
-  - Índice full-text (OpenSearch/Elasticsearch) para consultas livres (“onde assistir Flamengo domingo”). TODO
-
-- API de consulta:
-
-  - /matches?team=FLA&from=2025-09-19&to=2025-10-19&channel=streaming
-
-  - /next?team=CAM
-
-- Observabilidade: logs por página, métricas (páginas/h, taxa de erro, tempo por requisição).
-
-5) Modelo de Dados (resumo)
-
-tables
-
-teams(id, name, aliases[])
-
-matches(id, team_home_id, team_away_id, start_time_utc, start_time_tz, venue, competition, season, source_confidence)
-
-broadcasts(id, match_id, type, provider, url, is_official)
-
-documents(id, url, source, fetched_at, http_status, title, raw_text, lang, hash)
-
-extraction_logs(document_id, extractor, status, details)
-
-sources(id, domain, robots_policy, max_rps, last_crawl_at)
-
-6) Métricas de Qualidade
-
-Cobertura: % de jogos da Série A com registro e com canal indicado.
-
-Precisão de data/hora: % de partidas com fuso correto (comparação cruzada entre fontes).
-
-Completude de link: % de entradas com url quando for streaming/YouTube.
-
-Freshness: atraso médio (minutos/horas) entre atualização na fonte e atualização no índice.
-
-Dedup: razão entre itens únicos vs. páginas totais coletadas.
-
-7) Aspectos Éticos e Legais
-
-Respeitar robots.txt e Terms of Use; politeness/cota por domínio; identificação via User-Agent.
-
-Coletar apenas informação pública; não burlar paywalls; sem login.
-
-Citar fonte no dado normalizado (campo source + source_url); manter evidência (hash do HTML).
-
-## Descrição do Coletor
-1) Tipo do Coletor
-
-- Crawler vertical e focado (focused crawler) com:
-
-- Frontier orientada por prioridade (páginas de “agenda/rodada/onde assistir” > notícias > históricos).
-
-- Política de re-visita (scheduler) baseada no horizonte de jogos (7, 15 e 30 dias) e na dinâmica da fonte:
-
-- Fontes “rápidas” (portais/TV) revisitadas a cada 2–6h perto da rodada; clubes 6–24h.
-
-2) Propriedades Técnicas
-
-- Descoberta de URLs:
-
-seeds estáticas por fonte (ex.: /agenda, /tabela, /calendario, /onde-assistir, sitemaps).
-
-follow controlado: mesmo domínio e padrões whitelisted (regex).
-
-- Paralelismo e Politeness:
-
-N workers com limite por domínio (ex.: 1–2 req/s) + exponencial backoff.
-
-Respeito a Crawl-delay quando indicado; User-Agent identificável do projeto.
-
-- Tolerâncias (timeouts & retries):
-
-connect_timeout: 5–8s, read_timeout: 10–15s
-
-retry: 2 com backoff (apenas para 5xx/timeout), sem retry para 4xx exceto 429 (aguarda).
-
-- Critérios de Parada:
-
-Escala: coletar ≥ 50.000 páginas (somatório documents), mantendo proporção de fontes.
-
-Profundidade: max_depth por seed (ex.: 2 para “agenda”, 1 para “onde assistir”, 3 para notícias).
-
-Orçamento: max_pages_per_domain (ex.: 5k) e janela de tempo da coleta (ex.: 48–72h para a etapa).
-
-- Políticas de Frontier:
-
-PriorityQueue com score = tipo_página (agenda > onde-assistir > tabela > notícia > outros)
-
-recência (mais recente primeiro) + previsão de utilidade (contém nomes de clubes/rodada).
-
-- Normalização & Enriquecimento:
-
-Resolver nomes de times via dicionário/aliases e, se necessário, fuzzy match (Levenshtein).
-
-Timezone: parse em PT-BR, converte para America/Sao_Paulo e mantém cópia em UTC.
-
-Transmissão: mapeia keywords (“transmit”, “onde assistir”, “Premiere”, “YouTube”, “Amazon”, “Max”, “Globoplay”, etc.) e captura href quando disponível.
-
-- Deduplicação:
-
-hash do corpo para documentos;
-
-para partidas, chave canônica (home, away, start_time_utc ±15m, competição) com priorização de fonte oficial; conflitos viram alertas.
-
-- Extração Estruturada:
-
-Preferência por schema.org (SportsEvent, Event, BroadcastEvent) quando presente.
-
-Em HTML “livre”: seletores específicos por adaptador (ex.: .match-card .teams, .date-time, .where-to-watch a).
-
-- Observabilidade:
-
-Log por fetch (URL, status, ms); por extração (campos faltantes, regra acionada).
-
-Métricas Prometheus: pages_fetched_total, extract_errors_total, matches_upserted_total.
-
-3) Políticas Abordadas (Design Decisions + Justificativas)
-
-Vertical/focused: maximiza precisão para o domínio (Série A), simplificando normalização (dicionário de 20 clubes) e melhorando a qualidade do “onde assistir”.
-
-Adaptadores por fonte: lidam com HTML heterogêneo; reduzem quebra quando o layout muda.
-
-Priorizar páginas “agenda/rodada”: maior densidade de fixtures ⇒ melhor razão sinal/ruído.
-
-Relacional + Full-text: garantir consistência de partidas e flexibilidade de busca natural.
-
-Revisita baseada em calendário: transmissões podem mudar perto do jogo; aumenta a freshness.
-
-Rate limit por domínio e respeito a robots: evita bloqueios e cumpre boas práticas/ética.
-
-4) Critério de Escala (≥ 50 mil páginas)
-
-- Plano para atingir a meta dentro do escopo:
-
-20 clubes × (páginas de agenda/calendário + notícias + match reports + arquivos)
-
-Portais (múltiplas seções de tabela/rodada/notícias/guia TV)
-
-Plataformas/guia de programação (várias páginas/dia)
-
-Histórico de anos/rodadas anteriores (arquivos estáticos contam como itens coletados)
-
-Com a Frontier configurada, a coleta massiva de documentos é paralela à extração de fixtures (que são poucos por semana). Assim, garantimos quantidade (avaliação) e qualidade (dados alvo).
-
-5) Tolerâncias e Resiliência
-
-Falhas transitórias: backoff + retry controlado; fallback de extrator (xpath secundário).
-
-Mudança de layout: validação por testes de contrato de cada adaptador; flag “degradação” por fonte.
-
-Conflitos de informação (ex.: dois canais diferentes): marcar source_confidence e manter ambas as versões com carimbo de fonte e horário; regra de escolha “oficial > portal”.
-
-6) Segurança e Conformidade
-
-Sem credenciais; sem scraping de conteúdo protegido.
-
-Identificação com User-Agent do projeto; canal de contato.
-
-Config por domínio: limites, headers e janelas de coleta.
-
-7) Entregáveis para a Fase 1
-
-Diagrama (crawler ⇢ extrator ⇢ normalizador ⇢ banco/índice ⇢ API/queries).
-
-Amostra de 50–200 páginas coletadas com logs (para demonstrar politeness e extração).
-
-Dataset inicial de partidas futuras (JSON/CSV) com team_home, team_away, datetime_local, where_to_watch, link.
-
-Métricas iniciais: páginas coletadas por fonte, taxa de extração com sucesso, exemplos de conflitos resolvidos.
-
-## Pipeline de Processamento de Texto e Indexação
-
-O crawler agora realiza limpeza lexical de cada documento capturado antes de armazenar os metadados:
-
-- Normalização do texto (remoção de HTML, trims, minúsculas, remoção de acentos e de tokens fora do alfabeto).
-- Tokenização, remoção de stopwords (lista PT-BR personalizada) e stemming com `natural.PorterStemmerPt`.
-- Estatísticas por documento (total de tokens, densidade lexical, termos mais frequentes, tempo de processamento) salvas em `result/documents.jsonl`.
-
-### Configuração
-
-- `INDEX_CHUNK_SIZES`: tamanhos de chunk para análise/índice invertido (ex.: `160,240`). Usa 160 tokens por padrão (e avalia múltiplos buckets).
-- `INDEX_MIN_TOKEN_LENGTH`: comprimento mínimo do token (default `3`).
-- `INDEX_MAX_TOKENS`: número máximo de tokens por documento antes de truncar (default `25000`).
-- `LEXICAL_TOP_TERMS`: quantidade de termos relevantes registrados por documento (default `12`).
-- `INDEX_GRANULARITY`: apenas informativo para expor a granularidade utilizada (default `token`).
-
-### Índice Invertido e Métricas
-
-- Construção incremental em memória durante a coleta e flush ao final em `result/index/inverted-index.json`.
-- Para cada chunk size configurado são armazenados vocabulário, postings (docId, chunkId, tf) e estatísticas de cobertura.
-- `result/index/index-metadata.json` registra tempo total de indexação, tamanho do arquivo, vocabulário por chunk e snapshot de uso de memória.
-- O pipeline roda automaticamente via `persistDocumentMetadata` e é finalizado tanto no término normal quanto em casos de erro fatal.
-
-## Performance e Escala
-
-- O frontier agora usa fila priorizada (agenda > onde assistir > tabela > demais) e evita revisitar URLs normalizadas.
-- O loop principal foi paralelizado com `GLOBAL_MAX_CONCURRENCY` (default 6) respeitando limites por domínio via Bottleneck; ajustar no `.env` conforme necessário.
-- Defina `MAX_PAGES` para controlar o orçamento máximo de páginas por execução (padrão `60000`).
-- `MAX_RUNTIME_MINUTES` finaliza o crawler automaticamente após a janela desejada e `FRONTIER_RESUME=true` mantém o progresso entre execuções (snapshot em `result/frontier-state.json`, intervalo ajustável por `FRONTIER_SNAPSHOT_INTERVAL_MS`).
-- Seeds são carregadas automaticamente de todos os arquivos `.json` em `seeds/`, permitindo ciclos longos com diferentes conjuntos (portais, torcidas, analytics, etc.).
-- Links de follow dos adaptadores são sempre empilhados (mesmo quando já extraímos algum match) e páginas sem adaptador empurram um subconjunto de links de fallback para ampliar a cobertura.
-- `FALLBACK_LINK_LIMIT` define quantos links genéricos por página entram na fila (default 18), equilibrando profundidade e velocidade.
-- Métricas de execução em `result/crawl-metrics.json` permitem monitorar throughput e recalibrar seeds/limites.
-- Filtro embutido de hosts conhecidos por propaganda/ads (Taboola, Outbrain, DoubleClick, casas de aposta, etc.) evita gastar orçamento de páginas com conteúdo irrelevante.
-
-## Adaptadores Disponíveis
-
-- `GeTeamAgendaAdapter`: agendas e rodadas do ge.globo.
-- `EspnTeamAgendaAdapter`: competições e JSON-LD da ESPN.
-- `CbfAdapter`: tabelas, histórico, atletas e estatísticas do site da CBF.
-- `UolOndeAssistirAdapter`: páginas de agenda/onde assistir do UOL.
-- `LanceAgendaAdapter`: agenda, inline state e páginas de clubes do Lance.
-- `OneFootballAdapter`: dados estruturados (Next.js) e JSON-LD do OneFootball.
-- `GenericSportsNewsAdapter`: fallback inteligente para blogs/portais de torcida/mídia independente (Trivela, Placar, Goal, Torcedores, etc.), garantindo descoberta profunda de links mesmo quando não há fixture explícito.
-
-Todos os adaptadores compartilham deduplicação de partidas, normalização de nomes de times e heurísticas de broadcast (TV aberta, fechada, streaming e YouTube).
-
-## Seeds Atualizadas
-
-`seeds/serieA_2025.json` foi expandido com novos portais e hubs de clubes:
-
-- Portais: CBF, GE, ESPN, UOL, Lance, OneFootball, Goal, Torcedores, Gazeta Esportiva e Terra.
-- Clubes (GE): cobertura para toda a Série A + times promovidos (Cuiabá, Juventude, Mirassol, etc.).
-- Clubes (UOL/Lance): páginas principais de clubes tradicionais para ampliar profundidade de coleta.
-- Mídias independentes: blogs (Trivela, Placar, Futebol na Veia, etc.), portais analíticos (SofaScore, Flashscore, FootyStats) e newsletters/podcasts (Última Divisão, Jogada de Efeito).
-- Torcidas: páginas oficiais e sites de torcida para Flamengo, Corinthians, Palmeiras, São Paulo, Vasco, Botafogo, Cruzeiro, Grêmio e Internacional.
-
-O `config.ts` continua aceitando `SEEDS` via `.env`, mas agora também agrega automaticamente todos os arquivos `.json` encontrados em `seeds/`, garantindo diversidade contínua de fontes e ampliando as chances de ultrapassar 50k páginas coletadas.
-## TODO de Melhorias
-
-- Consolidar a persistência de documentos e partidas em PostgreSQL e Elasticsearch, substituindo os stubs em src/pipelines/store.ts e aplicando deduplicação no banco.
-
-## Atualização 2025-11 – Varredura do código
-
-### Panorama do repositório
-- O coletor principal continua em `src/index.ts`, agora ligado a uma `CrawlFrontier` com estratégia configurável (priority/dfs/bfs) e a um pipeline assíncrono de persistência (`src/pipelines/pipelineQueue.ts` + `documentWorker.ts`). O fluxo produz `result/documents.jsonl` e um índice invertido incremental em `result/index/`.
-- Os serviços de dados expõem os documentos indexados via `src/search/searchEngine.ts` (BM25 + boosts semânticos) e o endpoint de partidas `src/api/server.ts`/`matchInfoService.ts`, que enriquecem a base CSV com a agenda oficial do ge.globo (`geTeamScheduleService.ts`).
-- Seeds e tuning ficam centralizados em `src/config.ts`, que aceita `.env`, `SEEDS_FILE` e pasta `seeds/`.
-
-### Frontend React (BrasileirãoFinder)
-- Interface refeita em React/Vite (`frontend/`) mantendo o CSS original. `App.tsx` alterna dois fluxos: **Busca Inteligente**, que dispara pesquisas conforme o usuário digita (debounce + auto search), e **Agenda por Time**, que consulta o endpoint `/matches`.
-- Componentes de destaque:
-  - `SearchForm`, `PopularSearches` e `ResultsSection` compõem o funil de busca com estados de loading/erro/esvaziado preservados.
-  - `TeamMatchesExplorer` lista times (via `/matches/teams`), busca próximos jogos sob demanda (limit 4) e combina logos locais (`frontend/src/utils/teamLogos.ts`) com o proxy `/logos` para completar as artes.
-  - `ThemeToggle` persiste o modo claro/escuro no `localStorage`.
-- O frontend espera o backend em `VITE_API_BASE` (padrão `http://localhost:3001`). Fluxo sugerido:
-  1. `npm run search-api` (raiz) para subir a API Express.
-  2. `npm run frontend` (raiz) ou `npm run dev` em `frontend/` para o Vite.
-
-### Principais ganhos de desempenho do crawler
-- **Concorrência global ajustável** (`CRAWLER_CONFIG.globalMaxConcurrency`, padrão 15) com workers simultâneos coordenados via fila de prioridade, reduzindo o tempo até atingir 60k páginas.
-- **Rate limit por host** com Bottleneck (`src/crawler/fetcher.ts`): cada domínio recebe seu próprio reservatório/refresh de RPS + HTTP/2, evitando bloqueios e mantendo alto throughput.
-- **Tratamento de bloqueios de origem**: respeito automático a `robots.txt`, detecção de soft-404 e descarte de content-types não HTML evitam gastar ciclos com ruído.
-- **Cancelamento rápido**: `AbortController` garante que cada worker encerre requisições em andamento quando o crawler precisa parar (`max_pages`, sinal ou fronteira vazia), prevenindo threads zumbis.
-- **Persistência não bloqueante**: documentação e índice são processados em `worker_threads`, com snapshots periódicos (`INDEX_SNAPSHOT_INTERVAL`) e flush via mensagens (`flushPipelineQueues`), liberando os workers de rede para seguir capturando.
-- **Filtragem agressiva de URLs** (`src/utils/urlFilters.ts` + `MAX_DEPTH` + `FALLBACK_LINK_LIMIT`) corta domínios/paths indesejados e limita links por página, reduzindo latência ao evitar crawl inútil.
-
-### Checklist rápido de execução
-1. Configure `.env` (`SEEDS`, `GLOBAL_MAX_CONCURRENCY`, etc.).
-2. Rode `npm install` na raiz e `npm run start` ou `npm run dev` para iniciar o crawler.
-3. Gere/atualize o índice com o próprio pipeline (ou `npm run search-api` + frontend para exploração).

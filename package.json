@@ -10,7 +10,8 @@
     "frontend": "npm --prefix frontend run dev",
     "test-search": "tsx src/search/testSearch.ts",
     "build": "tsc -p .",
-    "lint": "eslint 'src/**/*.ts'"
+    "lint": "eslint 'src/**/*.ts'",
+    "rebuild-index": "tsx src/utils/rebuildIndex.ts"
   },
   "dependencies": {
     "@types/cors": "^2.8.19",
