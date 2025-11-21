@@ -9,6 +9,7 @@ interface CrawlMetrics {
   errorCount: number;
   sourceBreakdown: Record<string, number>;
   stopReason?: string;
+  pagesPerSecond?: number;
 }
 
 const metricsFile = path.join(process.cwd(), 'result', 'crawl-metrics.json');

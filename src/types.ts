@@ -56,17 +56,6 @@ export interface MatchItem {
   confidence?: number; 
 }
 
-export interface Adapter {
-  domain: string;
-  whitelistPatterns: RegExp[];
-  classify(url: string): PageType;
-  extract(doc: string, url: string): {
-    document?: Partial<DocumentItem>;
-    matches?: MatchItem[];
-    nextLinks?: string[];
-  };
-}
-
 export interface DocumentRecord {
   metadata: DocumentItem;
   cleanedText?: string;

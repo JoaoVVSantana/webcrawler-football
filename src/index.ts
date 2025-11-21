@@ -1,122 +1,72 @@
+import * as cheerio from 'cheerio';
 import { CRAWLER_CONFIG } from './config';
 import { CrawlFrontier } from './crawler/frontier';
 import { fetchHtml } from './crawler/fetcher';
 import { createDocumentMetadata, extractUniqueLinks } from './crawler/extractor';
 import { isHttpOrHttpsUrl } from './utils/url';
-import { persistDocumentMetadata, persistMatches } from './pipelines/store';
-import { EspnTeamAgendaAdapter } from './adapters/espnTeamAgenda';
-import { GeTeamAgendaAdapter } from './adapters/geTeamAgenda';
-import { CbfAdapter } from './adapters/cbfAdapter';
-import { UolOndeAssistirAdapter } from './adapters/uolOndeAssistir';
-import { LanceAgendaAdapter } from './adapters/lanceAgenda';
-import { OneFootballAdapter } from './adapters/oneFootball';
-import { GenericSportsNewsAdapter } from './adapters/genericSportsNews';
-import { Adapter, CrawlTask, PageType } from './types';
-import { appendMatchesToCsv } from './pipelines/csvStore';
+import { CrawlTask } from './types';
+import { scheduleDocumentPersist, flushPipelineQueues, shutdownDocumentPipeline } from './pipelines/pipelineQueue';
 import { saveMetrics } from './utils/metrics';
-import { finalizeInvertedIndex } from './indexing/invertedIndex';
 import { isBlockedUrl } from './utils/urlFilters';
-import { loadFrontierSnapshot, saveFrontierSnapshot } from './crawler/stateStore';
-
-const adapters: Adapter[] = [
-  new GeTeamAgendaAdapter(),
-  new EspnTeamAgendaAdapter(),
-  new CbfAdapter(),
-  new UolOndeAssistirAdapter(),
-  new LanceAgendaAdapter(),
-  new OneFootballAdapter(),
-  new GenericSportsNewsAdapter()
-];
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
-const FALLBACK_LINK_LIMIT = Math.max(0, CRAWLER_CONFIG.fallbackLinkLimit ?? 0);
+const MAX_LINKS_PER_PAGE = Math.max(0, CRAWLER_CONFIG.fallbackLinkLimit ?? 0);
+const PROCESS_ALL_LINKS = CRAWLER_CONFIG.processAllLinksFromPage !== false;
+const INITIAL_PRIORITY = 100;
+const PRIORITY_DECAY = 1;
 
-const PAGE_PRIORITY_BOOST: Record<PageType, number> = {
-  agenda: 25,
-  'onde-assistir': 22,
-  tabela: 18,
-  match: 18,
-  team: 12,
-  noticia: 6,
-  outro: 0
-};
+async function processCrawlTask(
+  crawlerTask: CrawlTask,
+  frontier: CrawlFrontier,
+  workerId: number,
+  signal?: AbortSignal
+): Promise<void> {
+  if (isBlockedUrl(crawlerTask.url)) return;
 
-function findAdapterForUrl(url: string): Adapter | undefined {
-  const normalizedUrl = url.toLowerCase();
-  return adapters.find(adapter => adapter.whitelistPatterns.some(pattern => pattern.test(normalizedUrl)));
-}
-
-function computeNextPriority(adapter: Adapter, url: string, parentPriority: number | undefined): number {
-  const pageType = adapter.classify(url);
-  const boost = PAGE_PRIORITY_BOOST[pageType] ?? 0;
-  const base = parentPriority ?? 0;
-  return base - 1 + boost;
-}
-
-async function processCrawlTask(crawlerTask: CrawlTask, frontier: CrawlFrontier): Promise<{ matches: number } | undefined> {
-  if (isBlockedUrl(crawlerTask.url)) return { matches: 0 };
-
-  const response = await fetchHtml(crawlerTask.url);
-  if (!response) return { matches: 0 };
+  const response = await fetchHtml(crawlerTask.url, workerId, signal);
+  if (!response) return;
 
   const html = response.body;
-  const selectedAdapter = findAdapterForUrl(crawlerTask.url);
-  const pageType = selectedAdapter ? selectedAdapter.classify(crawlerTask.url) : 'outro';
-  const documentRecord = createDocumentMetadata(crawlerTask.url, html, pageType);
+  const dom = cheerio.load(html);
+  const documentRecord = createDocumentMetadata(crawlerTask.url, html, undefined, dom);
   documentRecord.metadata.status = response.statusCode;
 
-  await persistDocumentMetadata(documentRecord);
-  if (selectedAdapter) {
+  scheduleDocumentPersist(documentRecord);
 
-    const { matches = [], nextLinks = [] } = selectedAdapter.extract(html, crawlerTask.url);
-    if (matches.length) {
-      await persistMatches(matches);
-      await appendMatchesToCsv(matches);
+  const outgoingLinks = extractUniqueLinks(crawlerTask.url, html, dom).filter(
+    link => isHttpOrHttpsUrl(link) && !isBlockedUrl(link)
+  );
+
+  const nextPriority = (crawlerTask.priority ?? INITIAL_PRIORITY) - PRIORITY_DECAY;
+  const shouldLimitLinks = MAX_LINKS_PER_PAGE > 0;
+  const linksToEnqueue = shouldLimitLinks ? outgoingLinks.slice(0, MAX_LINKS_PER_PAGE) : outgoingLinks;
+  const deferredLinks = shouldLimitLinks ? outgoingLinks.slice(MAX_LINKS_PER_PAGE) : [];
+
+  for (const link of linksToEnqueue) {
+    try {
+      frontier.pushIfAbsent({
+        url: link,
+        depth: (crawlerTask.depth ?? 0) + 1,
+        priority: nextPriority
+      });
+    } catch {
+      // ignore malformed URLs
     }
-
-    if (nextLinks.length) {
-      for (const link of nextLinks) {
-        try {
-          const currentLink = new URL(link, crawlerTask.url).toString();
-          if (isBlockedUrl(currentLink)) continue;
-          if (!isHttpOrHttpsUrl(currentLink)) continue;
-          if (!selectedAdapter.whitelistPatterns.some(pattern => pattern.test(currentLink))) continue;
-          if (frontier.has(currentLink)) continue;
-
-          const nextPriority = computeNextPriority(selectedAdapter, currentLink, crawlerTask.priority);
-          frontier.push({
-            url: currentLink,
-            depth: (crawlerTask.depth ?? 0) + 1,
-            priority: nextPriority
-          });
-        } catch {
-          // ignore malformed URLs
-        }
-      }
-    }
-
-    return { matches: matches.length };
   }
 
-  if (FALLBACK_LINK_LIMIT > 0) {
-    const fallbackLinks = extractUniqueLinks(crawlerTask.url, html)
-      .filter(link => isHttpOrHttpsUrl(link) && !isBlockedUrl(link));
-
-    for (const rawLink of fallbackLinks.slice(0, FALLBACK_LINK_LIMIT)) {
+  if (PROCESS_ALL_LINKS && deferredLinks.length > 0) {
+    deferredLinks.forEach((link, index) => {
       try {
-        if (frontier.has(rawLink)) continue;
-        frontier.push({
-          url: rawLink,
+        frontier.pushIfAbsent({
+          url: link,
           depth: (crawlerTask.depth ?? 0) + 1,
-          priority: (crawlerTask.priority ?? 0) - 2
+          priority: nextPriority - (index + 1) * PRIORITY_DECAY
         });
       } catch {
         // ignore malformed URLs
       }
-    }
+    });
   }
-
-  return { matches: 0 };
 }
 
 async function main() {
@@ -128,47 +78,13 @@ async function main() {
   const startTime = new Date().toISOString();
   const startTimestamp = Date.now();
   console.log({ seeds: CRAWLER_CONFIG.seeds }, 'Iniciando crawler');
-  const frontier = new CrawlFrontier();
-
-  const snapshotPath = CRAWLER_CONFIG.frontierSnapshotPath;
-  const snapshotInterval = Math.max(0, CRAWLER_CONFIG.frontierSnapshotIntervalMs ?? 0);
-  let lastSnapshotAt = Date.now();
-  let isSavingSnapshot = false;
-
-  if (CRAWLER_CONFIG.resumeFrontier) {
-    const snapshot = loadFrontierSnapshot(snapshotPath);
-    if (snapshot) {
-      frontier.restore({ queue: snapshot.queue, visited: snapshot.visited });
-      console.log(
-        { restoredQueue: frontier.size(), restoredVisited: frontier.visitedCount() },
-        'Frontier restaurada de snapshot'
-      );
-    }
-  }
+  const frontier = new CrawlFrontier({
+    maxDepth: CRAWLER_CONFIG.maxDepth,
+    strategy: CRAWLER_CONFIG.frontierStrategy
+  });
 
   for (const seed of CRAWLER_CONFIG.seeds) {
-    frontier.push({ url: seed, depth: 0, priority: 100 });
-  }
-
-  async function maybeSnapshot(force = false) {
-    if (!CRAWLER_CONFIG.resumeFrontier) return;
-    if (!snapshotPath) return;
-    const now = Date.now();
-    if (!force && snapshotInterval <= 0) return;
-    if (!force && snapshotInterval > 0 && now - lastSnapshotAt < snapshotInterval) return;
-    if (isSavingSnapshot) return;
-    isSavingSnapshot = true;
-    try {
-      const state = frontier.serialize();
-      await saveFrontierSnapshot(snapshotPath, {
-        queue: state.queue,
-        visited: state.visited,
-        createdAt: new Date().toISOString()
-      });
-      lastSnapshotAt = now;
-    } finally {
-      isSavingSnapshot = false;
-    }
+    frontier.push({ url: seed, depth: 0, priority: INITIAL_PRIORITY });
   }
 
   const statistics = {
@@ -182,34 +98,80 @@ async function main() {
   let stopRequested = false;
   let stopReason: string | null = null;
   let activeFetches = 0;
+  const activeControllers = new Map<number, AbortController>();
+
+  function cancelActiveFetches(): void {
+    activeControllers.forEach(controller => controller.abort());
+    activeControllers.clear();
+  }
+
+  function requestStop(reason: string) {
+    const wasRequested = stopRequested;
+    stopRequested = true;
+    stopReason = stopReason ?? reason;
+    if (!wasRequested) {
+      cancelActiveFetches();
+    }
+  }
+
+  const cleanupHandlers: Array<() => void> = [];
+
+  function assembleMetrics() {
+    const endTime = new Date().toISOString();
+    const durationSeconds = Math.max(1, (new Date(endTime).getTime() - new Date(startTime).getTime()) / 1000);
+    const pagesPerSecond = statistics.processed / durationSeconds;
+    return {
+      startTime,
+      endTime,
+      pagesProcessed: statistics.processed,
+      matchesFound: statistics.matchesFound,
+      errorCount: statistics.errorCount,
+      pagesPerSecond,
+      sourceBreakdown,
+      stopReason: stopReason ?? undefined
+    };
+  }
 
   async function worker(workerId: number) {
+    let emptyCycles = 0;
     while (true) {
       if (stopRequested) break;
       if (CRAWLER_CONFIG.maxRuntimeMs > 0 && Date.now() - startTimestamp >= CRAWLER_CONFIG.maxRuntimeMs) {
-        stopRequested = true;
-        stopReason = stopReason ?? 'runtime_limit';
+        requestStop('runtime_limit');
         break;
       }
       if (statistics.processed >= maxPagesToProcess) {
-        stopRequested = true;
-        stopReason = stopReason ?? 'max_pages';
+        requestStop('max_pages');
         break;
       }
 
       const task = frontier.pop();
       if (!task) {
+        emptyCycles++;
+        if (emptyCycles % 100 === 0) {
+          console.log(
+            {
+              worker: workerId,
+              frontierSize: frontier.size(),
+              activeFetches,
+              processed: statistics.processed
+            },
+            'Worker aguardando tarefas'
+          );
+        }
         if (stopRequested) break;
         if (activeFetches === 0 && frontier.size() === 0) {
-          stopRequested = true;
-          stopReason = stopReason ?? 'frontier_empty';
+          requestStop('frontier_empty');
           break;
         }
-        await sleep(25);
+        await sleep(5);
         continue;
       }
+      emptyCycles = 0;
 
       activeFetches++;
+      const controller = new AbortController();
+      activeControllers.set(workerId, controller);
       try {
         console.log(
           {
@@ -221,8 +183,7 @@ async function main() {
           'Processando'
         );
 
-        const result = await processCrawlTask(task, frontier);
-        if (result?.matches) statistics.matchesFound += result.matches;
+        await processCrawlTask(task, frontier, workerId, controller.signal);
         const domain = new URL(task.url).hostname;
         sourceBreakdown[domain] = (sourceBreakdown[domain] || 0) + 1;
       } catch (e: any) {
@@ -231,46 +192,77 @@ async function main() {
       } finally {
         activeFetches--;
         statistics.processed++;
+        activeControllers.delete(workerId);
         if (statistics.processed >= maxPagesToProcess) {
-          stopRequested = true;
-          stopReason = stopReason ?? 'max_pages';
+          requestStop('max_pages');
         }
-        await maybeSnapshot(false);
       }
     }
   }
 
   const workers = Array.from({ length: concurrency }, (_, index) => worker(index + 1));
-  await Promise.all(workers);
-  await maybeSnapshot(true);
+  const workersPromise = Promise.all(workers);
+  let finalizationPromise: Promise<void> | null = null;
 
-  const endTime = new Date().toISOString();
-  console.log(
-    {
-      processed: statistics.processed,
-      matchesFound: statistics.matchesFound,
-      errorCount: statistics.errorCount,
-      visited: frontier.visitedCount(),
-      stopReason
-    },
-    'Crawler finalizado'
-  );
-  
-  saveMetrics({
-    startTime,
-    endTime,
-    pagesProcessed: statistics.processed,
-    matchesFound: statistics.matchesFound,
-    errorCount: statistics.errorCount,
-    sourceBreakdown,
-    stopReason: stopReason ?? undefined
+  const finalizeRun = (reason?: string): Promise<void> => {
+    if (finalizationPromise) return finalizationPromise;
+    finalizationPromise = (async () => {
+      if (reason) requestStop(reason);
+      try {
+        await workersPromise;
+      } catch (err) {
+        console.error({ err }, 'Erro ao aguardar workers');
+        requestStop('worker_error');
+      } finally {
+        for (const dispose of cleanupHandlers) dispose();
+      }
+
+      try {
+        await flushPipelineQueues();
+      } catch (err) {
+        console.error({ err }, 'Falha ao esvaziar pipelines');
+      }
+
+      try {
+        await shutdownDocumentPipeline();
+      } catch (err) {
+        console.error({ err }, 'Falha ao encerrar pipeline de documentos');
+      }
+
+      const metricsPayload = assembleMetrics();
+      try {
+        saveMetrics(metricsPayload);
+      } catch (err) {
+        console.error({ err }, 'Falha ao salvar métricas');
+      }
+
+      console.log(
+        {
+          ...metricsPayload,
+          visited: frontier.visitedCount()
+        },
+        'Crawler finalizado'
+      );
+    })();
+    return finalizationPromise;
+  };
+
+  const handleSignal = (signal: NodeJS.Signals) => {
+    console.log({ signal }, 'Sinal recebido, finalizando crawler...');
+    finalizeRun('manual_stop').finally(() => process.exit(0));
+  };
+
+  process.once('SIGINT', handleSignal);
+  process.once('SIGTERM', handleSignal);
+  cleanupHandlers.push(() => {
+    process.off('SIGINT', handleSignal);
+    process.off('SIGTERM', handleSignal);
   });
-  finalizeInvertedIndex();
+
+  await finalizeRun();
 }
 
-main().catch(err => {
+main().catch(async err => {
   console.log({ err }, 'Erro fatal');
-  finalizeInvertedIndex();
   process.exit(1);
 });
-

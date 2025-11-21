@@ -2,6 +2,8 @@ import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
 
+type FrontierStrategy = 'priority' | 'dfs' | 'bfs';
+
 function parseNumberList(input: string | undefined, fallback: number[]): number[] {
   if (!input) return fallback;
   const values = input
@@ -61,22 +63,31 @@ if (process.env.SEEDS_FILE) {
 seedUrls = Array.from(new Set(seedUrls.filter(Boolean)));
 
 const defaultChunkSizes = parseNumberList(process.env.INDEX_CHUNK_SIZES, [160, 240]);
+const normalizedFrontierStrategy = (process.env.CRAWLER_STRATEGY ?? 'priority').toLowerCase();
+const processedFrontierStrategy: FrontierStrategy =
+  normalizedFrontierStrategy === 'dfs'
+    ? 'dfs'
+    : normalizedFrontierStrategy === 'bfs'
+    ? 'bfs'
+    : 'priority';
+const exploreAllLinks = (process.env.CRAWLER_PROCESS_ALL_LINKS ?? 'true').toLowerCase() === 'true';
 
 export const CRAWLER_CONFIG = {
-  globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 6),
-  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 1),
-  requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 15000),
+  globalMaxConcurrency: Number(process.env.GLOBAL_MAX_CONCURRENCY ?? 15),
+  perDomainRps: Number(process.env.PER_DOMAIN_RPS ?? 15),
+  requestTimeoutMs: Number(process.env.REQUEST_TIMEOUT_MS ?? 5000),
   seeds: seedUrls,
   respectRobots: (process.env.RESPECT_ROBOTS ?? 'true').toLowerCase() === 'true',
-  userAgentHeader: process.env.CRAWLER_USER_AGENT ?? 'CrawlerBrasileirao/0.1',
+  userAgentHeader:
+    process.env.CRAWLER_USER_AGENT ||
+    'WebCrawlerFootball/1.0 (+contato: seu-email@dominio.com; proposito: monitoramento futebol)',
   acceptHeader: 'text/html,application/xhtml+xml',
   languageHeader: 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-  resumeFrontier: (process.env.FRONTIER_RESUME ?? 'true').toLowerCase() === 'true',
-  frontierSnapshotPath:
-    process.env.FRONTIER_SNAPSHOT_PATH ?? path.join(process.cwd(), 'result', 'frontier-state.json'),
-  frontierSnapshotIntervalMs: Number(process.env.FRONTIER_SNAPSHOT_INTERVAL_MS ?? 60000),
   maxRuntimeMs: Number(process.env.MAX_RUNTIME_MINUTES ?? 0) * 60_000,
   fallbackLinkLimit: Number(process.env.FALLBACK_LINK_LIMIT ?? 18),
+  processAllLinksFromPage: exploreAllLinks,
+  maxDepth: Number(process.env.MAX_DEPTH ?? 10),
+  frontierStrategy: processedFrontierStrategy,
   index: {
     chunkSizes: defaultChunkSizes,
     primaryChunkSize: defaultChunkSizes[0],

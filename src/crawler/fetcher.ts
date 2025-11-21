@@ -61,7 +61,7 @@ function isSoft404Response(html: string) {
   );
 }
 
-export async function fetchHtml(url: string): Promise<Response<string> | null> {
+export async function fetchHtml(url: string, workerId?: number, signal?: AbortSignal): Promise<Response<string> | null> {
   const parsedUrl = new URL(url);
   const origin = parsedUrl.origin;      
   const hostname = parsedUrl.hostname;
@@ -72,7 +72,7 @@ export async function fetchHtml(url: string): Promise<Response<string> | null> {
 
     if (!robotsParserInstance.isAllowed(url, CRAWLER_CONFIG.userAgentHeader)) 
     {
-      //console.log({ url }, 'Bloqueado por robots.txt');
+      console.log({ url }, 'Bloqueado por robots.txt');
       return null;
     }
   }
@@ -97,13 +97,25 @@ export async function fetchHtml(url: string): Promise<Response<string> | null> {
         http2: true,
         decompress: true,
         throwHttpErrors: false,
-        followRedirect: true
+        followRedirect: true,
+        signal
       });
       const responseByteLength = (response.rawBody as any)?.length ?? 0;
       //console.log({ status: res.statusCode, bytes: responseByteLength }, 'RESP');
 
       if (response.statusCode >= 400) {
-        //console.log({ url, status: response.statusCode }, 'Descartado (status >= 400)');
+        const logData = { url, status: response.statusCode, worker: workerId, host: hostname };
+        if (response.statusCode === 429 || response.statusCode === 403) {
+          console.warn(logData, 'Rate limit/bloqueio detectado');
+        } else {
+          console.log(logData, 'Descartado (status >= 400)');
+        }
+        return null;
+      }
+
+      const contentType = response.headers['content-type'] ?? '';
+      if (contentType && !contentType.toLowerCase().includes('text/html')) {
+        console.log({ url, contentType }, 'Descartado (content-type nao suportado)');
         return null;
       }
 
@@ -116,7 +128,11 @@ export async function fetchHtml(url: string): Promise<Response<string> | null> {
     } 
     catch (e: any) 
     {
-      console.log({ url, err: e?.message }, 'Erro fetch');
+      if (e?.name === 'AbortError') {
+        console.log({ url }, 'Fetch abortado');
+      } else {
+        console.log({ url, err: e?.message }, 'Erro fetch');
+      }
       return null;
     }
   });

@@ -21,7 +21,21 @@ const BLOCKED_HOST_PATTERNS: RegExp[] = [
   /(^|\.)1xbet\./i,
   /(^|\.)betano\./i,
   /(^|\.)pixbet\./i,
-  /(^|\.)leonbet\./i
+  /(^|\.)leonbet\./i,
+  /(^|\.)whatsapp\.com$/i,
+  /(^|\.)wa\.me$/i,
+  /(^|\.)web\.whatsapp\.com$/i,
+  /(^|\.)t\.me$/i,
+  /(^|\.)telegram\.me$/i,
+  /(^|\.)telegram\.org$/i,
+  /(^|\.)discord\.com$/i,
+  /(^|\.)discordapp\.com$/i,
+  /(^|\.)suporte\./i,
+  /(^|\.)support\./i,
+  /(^|\.)help\./i,
+  /(^|\.)nba\./i,
+  /(^|\.)ufc\./i
+
 ];
 
 const BLOCKED_PATH_PATTERNS: RegExp[] = [
@@ -33,10 +47,51 @@ const BLOCKED_PATH_PATTERNS: RegExp[] = [
   /\/analytics\//i,
   /\/pixel\//i,
   /\/tag\/manager\//i,
-  /\/consent\//i
+  /\/consent\//i,
+  /\/suporte\b/i,
+  /\/support\b/i,
+  /\/ajuda\b/i,
+  /\/help\b/i,
+  /\/faq\b/i,
+  /\/contato\b/i,
+  /\/contact\b/i,
+  /\/sac\b/i,
+  /\/atendimento\b/i,
+  /\/minha[-_]conta\b/i,
+  /\/my[-_]account\b/i,
+  /\/account\b/i,
+  /\/login\b/i,
+  /\/signin\b/i,
+  /\/chat\b/i,
+  /\/whatsapp\b/i,
+  /\/telegram\b/i
 ];
 
-const BLOCKED_EXTENSIONS = ['.gif', '.jpg', '.jpeg', '.png', '.svg', '.ico', '.webp', '.mp4', '.mp3', '.avi', '.mov'];
+const BLOCKED_EXTENSIONS = [
+  '.gif',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.svg',
+  '.ico',
+  '.webp',
+  '.mp4',
+  '.mp3',
+  '.avi',
+  '.mov',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.ppt',
+  '.pptx',
+  '.xls',
+  '.xlsx',
+  '.zip',
+  '.rar',
+  '.7z',
+  '.gz',
+  '.tar'
+];
 
 export function isBlockedUrl(candidateUrl: string): boolean {
   let parsedUrl: URL;
