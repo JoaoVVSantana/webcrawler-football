@@ -294,3 +294,32 @@ O `config.ts` continua aceitando `SEEDS` via `.env`, mas agora também agrega au
 
 - Consolidar a persistência de documentos e partidas em PostgreSQL e Elasticsearch, substituindo os stubs em src/pipelines/store.ts e aplicando deduplicação no banco.
 
+## Atualização 2025-11 – Varredura do código
+
+### Panorama do repositório
+- O coletor principal continua em `src/index.ts`, agora ligado a uma `CrawlFrontier` com estratégia configurável (priority/dfs/bfs) e a um pipeline assíncrono de persistência (`src/pipelines/pipelineQueue.ts` + `documentWorker.ts`). O fluxo produz `result/documents.jsonl` e um índice invertido incremental em `result/index/`.
+- Os serviços de dados expõem os documentos indexados via `src/search/searchEngine.ts` (BM25 + boosts semânticos) e o endpoint de partidas `src/api/server.ts`/`matchInfoService.ts`, que enriquecem a base CSV com a agenda oficial do ge.globo (`geTeamScheduleService.ts`).
+- Seeds e tuning ficam centralizados em `src/config.ts`, que aceita `.env`, `SEEDS_FILE` e pasta `seeds/`.
+
+### Frontend React (BrasileirãoFinder)
+- Interface refeita em React/Vite (`frontend/`) mantendo o CSS original. `App.tsx` alterna dois fluxos: **Busca Inteligente**, que dispara pesquisas conforme o usuário digita (debounce + auto search), e **Agenda por Time**, que consulta o endpoint `/matches`.
+- Componentes de destaque:
+  - `SearchForm`, `PopularSearches` e `ResultsSection` compõem o funil de busca com estados de loading/erro/esvaziado preservados.
+  - `TeamMatchesExplorer` lista times (via `/matches/teams`), busca próximos jogos sob demanda (limit 4) e combina logos locais (`frontend/src/utils/teamLogos.ts`) com o proxy `/logos` para completar as artes.
+  - `ThemeToggle` persiste o modo claro/escuro no `localStorage`.
+- O frontend espera o backend em `VITE_API_BASE` (padrão `http://localhost:3001`). Fluxo sugerido:
+  1. `npm run search-api` (raiz) para subir a API Express.
+  2. `npm run frontend` (raiz) ou `npm run dev` em `frontend/` para o Vite.
+
+### Principais ganhos de desempenho do crawler
+- **Concorrência global ajustável** (`CRAWLER_CONFIG.globalMaxConcurrency`, padrão 15) com workers simultâneos coordenados via fila de prioridade, reduzindo o tempo até atingir 60k páginas.
+- **Rate limit por host** com Bottleneck (`src/crawler/fetcher.ts`): cada domínio recebe seu próprio reservatório/refresh de RPS + HTTP/2, evitando bloqueios e mantendo alto throughput.
+- **Tratamento de bloqueios de origem**: respeito automático a `robots.txt`, detecção de soft-404 e descarte de content-types não HTML evitam gastar ciclos com ruído.
+- **Cancelamento rápido**: `AbortController` garante que cada worker encerre requisições em andamento quando o crawler precisa parar (`max_pages`, sinal ou fronteira vazia), prevenindo threads zumbis.
+- **Persistência não bloqueante**: documentação e índice são processados em `worker_threads`, com snapshots periódicos (`INDEX_SNAPSHOT_INTERVAL`) e flush via mensagens (`flushPipelineQueues`), liberando os workers de rede para seguir capturando.
+- **Filtragem agressiva de URLs** (`src/utils/urlFilters.ts` + `MAX_DEPTH` + `FALLBACK_LINK_LIMIT`) corta domínios/paths indesejados e limita links por página, reduzindo latência ao evitar crawl inútil.
+
+### Checklist rápido de execução
+1. Configure `.env` (`SEEDS`, `GLOBAL_MAX_CONCURRENCY`, etc.).
+2. Rode `npm install` na raiz e `npm run start` ou `npm run dev` para iniciar o crawler.
+3. Gere/atualize o índice com o próprio pipeline (ou `npm run search-api` + frontend para exploração).

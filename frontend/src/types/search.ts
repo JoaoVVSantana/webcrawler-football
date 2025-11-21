@@ -9,13 +9,9 @@ export interface SearchResult {
   tokenCount?: number;
 }
 
-export interface QueryTerm {
-  term: string;
-  stemmed: string;
-  weight: number;
-}
-
-export interface SearchOptions {
-  limit?: number;
-  minScore?: number;
+export interface SearchResponse {
+  query: string;
+  total: number;
+  processingTime: number;
+  results: SearchResult[];
 }
