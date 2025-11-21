@@ -17,6 +17,32 @@ function buildTimestamp(match: MatchInfo): number {
   return Date.UTC(year || 0, (month || 1) - 1, day || 1, hour || 0, minute || 0);
 }
 
+type TeamLogoProps = {
+  teamName: string;
+  localLogo?: string;
+  fallbackLogo?: string;
+};
+
+function TeamLogo({ teamName, localLogo, fallbackLogo }: TeamLogoProps) {
+  const [source, setSource] = useState(localLogo ?? fallbackLogo);
+
+  useEffect(() => {
+    setSource(localLogo ?? fallbackLogo);
+  }, [localLogo, fallbackLogo]);
+
+  if (!source) return null;
+
+  const handleError = () => {
+    if (source !== fallbackLogo && fallbackLogo) {
+      setSource(fallbackLogo);
+    } else {
+      setSource(undefined);
+    }
+  };
+
+  return <img src={source} alt={`Escudo do ${teamName}`} className="team-logo" onError={handleError} />;
+}
+
 export function TeamMatchesExplorer() {
   const [teams, setTeams] = useState<string[]>([]);
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -92,15 +118,11 @@ export function TeamMatchesExplorer() {
     <section className="matches-page">
       <header className="matches-intro">
         <div>
-          <p className="eyebrow">Agenda personalizada</p>
+          <p className="eyebrow">Agenda dos times</p>
           <h2>Consulte os próximos jogos por time</h2>
           <p>
-            A lista é montada em tempo real a partir da base <code>matches.csv</code> e enriquecida com dados da fonte
-            oficial sempre que você escolhe um time.
+            A lista é montada em tempo real a partir do Crawler, que roda sempre que você escolhe um time. Os dados são armazenados em cache.
           </p>
-        </div>
-        <div className="matches-highlight">
-          <span>Dados atualizados em cada consulta</span>
         </div>
       </header>
 
@@ -142,7 +164,7 @@ export function TeamMatchesExplorer() {
       ) : matches.length === 0 ? (
         <div className="matches-placeholder">
           <p>Selecione um time para ver os próximos confrontos e onde assistir.</p>
-          <small>Os dados são embasados na coleta do arquivo matches.csv e conferidos na hora em sites oficiais.</small>
+          <small>Os dados são embasados na coleta do Crawler e conferidos na hora em sites oficiais.</small>
         </div>
       ) : (
         <div className="match-grid">
@@ -158,8 +180,10 @@ export function TeamMatchesExplorer() {
             ) as Array<{ name: string; logo?: string }>;
 
             const proxyLogo = (url?: string) => (url ? MatchesAPI.logoProxy(url) : undefined);
-            const homeLogo = getLocalTeamLogo(match.homeTeam) ?? proxyLogo(match.homeTeamLogo);
-            const awayLogo = getLocalTeamLogo(match.awayTeam) ?? proxyLogo(match.awayTeamLogo);
+            const homeLocalLogo = getLocalTeamLogo(match.homeTeam);
+            const awayLocalLogo = getLocalTeamLogo(match.awayTeam);
+            const homeFallbackLogo = proxyLogo(match.homeTeamLogo);
+            const awayFallbackLogo = proxyLogo(match.awayTeamLogo);
             const broadcasters = broadcasterEntries.map(entry => ({
               name: entry.name,
               logo: proxyLogo(entry.logo)
@@ -182,12 +206,12 @@ export function TeamMatchesExplorer() {
                     <div className="match-competition">{match.competition}</div>
                     <div className="team-row">
                       <div className="team-info">
-                        {homeLogo && <img src={homeLogo} alt={`Escudo do ${match.homeTeam}`} className="team-logo" />}
+                        <TeamLogo teamName={match.homeTeam} localLogo={homeLocalLogo} fallbackLogo={homeFallbackLogo} />
                         <span>{match.homeTeam}</span>
                       </div>
                       <span className="team-vs">vs</span>
                       <div className="team-info">
-                        {awayLogo && <img src={awayLogo} alt={`Escudo do ${match.awayTeam}`} className="team-logo" />}
+                        <TeamLogo teamName={match.awayTeam} localLogo={awayLocalLogo} fallbackLogo={awayFallbackLogo} />
                         <span>{match.awayTeam}</span>
                       </div>
                     </div>

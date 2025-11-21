@@ -112,13 +112,12 @@ export default function App() {
 
   const heroStats = useMemo(
     () => [
-      { label: 'Domínios monitorados', value: '1300+' },
-      { label: 'Resultados indexados', value: '65999' },
-      { label: 'Cobertura em tempo real', value: '⚡26 Pages Per Sec' }
+      { label: 'Dominios monitorados', value: '1300+', icon: '🌐' },
+      { label: 'Resultados indexados', value: '65999', icon: '📊' },
+      { label: 'Cobertura em tempo real', value: '26 PPS', icon: '⚡' }
     ],
     []
   );
-
   const pageTabs: Array<{ id: 'search' | 'matches'; label: string }> = useMemo(
     () => [
       { id: 'search', label: 'Busca inteligente' },
@@ -133,16 +132,23 @@ export default function App() {
 
       <header className="header">
         <div className="hero-content">
-          <h1 className="hero-title">
-            <span className="hero-ball" aria-hidden="true">
-              ⚽
-            </span>
-            BrasileirãoFinder
-          </h1>
-          <p className="hero-subtitle">Encontre tudo sobre o Campeonato Brasileiro</p>
+          <div className="hero-text">
+            <h1 className="hero-title">
+              <span className="hero-ball" aria-hidden="true">
+                ⚽
+              </span>
+              BrasileirãoFinder
+            </h1>
+            <p className="hero-subtitle">Encontre tudo sobre o Campeonato Brasileiro</p>
+          </div>
           <div className="hero-stats">
-            {heroStats.map((stat) => (
+            {heroStats.map(stat => (
               <div key={stat.label} className="stat-item">
+                {stat.icon && (
+                  <div className="stat-icon-wrapper" aria-hidden="true">
+                    <span className="stat-icon">{stat.icon}</span>
+                  </div>
+                )}
                 <div className="stat-value">{stat.value}</div>
                 <div className="stat-label">{stat.label}</div>
               </div>

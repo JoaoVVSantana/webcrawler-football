@@ -89,10 +89,11 @@ body::before {
 }
 
 .header {
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(15, 23, 42, 0.85);
   backdrop-filter: blur(20px);
-  padding: 3rem 1rem;
-  text-align: center;
+  padding: clamp(1rem, 2vw, 1.5rem) clamp(1rem, 3vw, 2rem);
+  min-height: 15vh;
+  text-align: left;
   position: relative;
   overflow: hidden;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -107,12 +108,21 @@ body::before {
 .hero-content {
   position: relative;
   z-index: 2;
-  max-width: 800px;
+  max-width: 1100px;
   margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.hero-text {
+  flex: 1;
+  text-align: left;
 }
 
 .hero-title {
-  font-size: 3.5rem;
+  font-size: clamp(2.25rem, 4vw, 3rem);
   font-weight: 800;
   background: linear-gradient(135deg, #10b981, #3b82f6, #8b5cf6);
   background-size: 200% 200%;
@@ -150,8 +160,8 @@ body::before {
 
 .hero-subtitle {
   color: rgba(255, 255, 255, 0.8);
-  font-size: 1.3rem;
-  margin-bottom: 2rem;
+  font-size: 1rem;
+  margin-top: 0.35rem;
   font-weight: 300;
 }
 
@@ -161,19 +171,26 @@ body::before {
 
 .hero-stats {
   display: flex;
-  justify-content: center;
-  gap: 2rem;
-  margin-top: 2rem;
+  justify-content: flex-end;
+  gap: 0.75rem;
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 280px;
 }
 
 .stat-item {
   background: rgba(255, 255, 255, 0.1);
   backdrop-filter: blur(10px);
-  padding: 1rem 1.5rem;
-  border-radius: 15px;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 160px;
+  flex: 1 1 30%;
 }
 
 .light .stat-item {
@@ -192,22 +209,60 @@ body::before {
   box-shadow: 0 10px 30px rgba(16, 185, 129, 0.2);
 }
 
-.stat-number {
-  font-size: 1.8rem;
+.stat-icon-wrapper {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.35);
+}
+
+.light .stat-icon-wrapper {
+  background: rgba(15, 23, 42, 0.05);
+  box-shadow: 0 0 15px rgba(15, 23, 42, 0.15);
+}
+
+.stat-value {
+  font-size: 1.5rem;
   font-weight: 700;
   color: #10b981;
-  display: block;
+  text-align: center;
+}
+
+.stat-icon {
+  font-size: 1.4rem;
+  line-height: 1;
 }
 
 .stat-label {
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.7);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  text-align: center;
 }
 
 .light .stat-label {
   color: rgba(15, 23, 42, 0.8);
+}
+
+@media (max-width: 900px) {
+  .hero-content {
+    flex-direction: column;
+    text-align: center;
+    gap: 1.5rem;
+  }
+
+  .hero-text {
+    text-align: center;
+  }
+
+  .hero-stats {
+    justify-content: center;
+  }
 }
 
 .main {
@@ -893,6 +948,8 @@ body::before {
   gap: 2rem;
   font-size: 1.2rem;
   flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .team-info {
@@ -923,19 +980,34 @@ body::before {
   color: rgba(248, 250, 252, 0.6);
 }
 
+.match-competition,
+.match-datetime {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: linear-gradient(120deg, rgba(59, 130, 246, 0.25), rgba(14, 165, 233, 0.2));
+  border: 1px solid rgba(191, 219, 254, 0.4);
+  color: #e0f2fe;
+  box-shadow: 0 8px 20px rgba(2, 6, 23, 0.35);
+  font-weight: 600;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
 .match-competition {
   font-size: 0.85rem;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: rgba(248, 250, 252, 0.7);
-  flex: 1;
+  margin-right: auto;
 }
 
 .match-datetime {
-  color: rgba(248, 250, 252, 0.75);
   font-size: 0.95rem;
   text-align: right;
-  flex: 1;
+  letter-spacing: 0.05em;
+  margin-left: auto;
 }
 
 .match-details {
@@ -1067,13 +1139,19 @@ a.match-detail-value:hover,
   background: rgba(255, 255, 255, 0.98);
 }
 
-.light .match-competition,
-.light .match-datetime,
 .light .match-source p,
 .light .match-detail-label,
 .light .match-detail-value,
 .light .matches-placeholder small {
   color: rgba(15, 23, 42, 0.6);
+}
+
+.light .match-competition,
+.light .match-datetime {
+  color: #1e3a8a;
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
 }
 
 .light a.match-detail-value {
