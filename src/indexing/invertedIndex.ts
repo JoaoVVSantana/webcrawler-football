@@ -104,7 +104,23 @@ class InvertedIndexBuilder {
 
     const serialized = this.serialize();
     const indexFilePath = path.join(this.indexDir, 'inverted-index.json');
-    fs.writeFileSync(indexFilePath, JSON.stringify(serialized, null, 2));
+    let serializedPayload: string;
+    try {
+      serializedPayload = JSON.stringify(serialized, null, 2);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        console.error(
+          {
+            documents: this.documents.size,
+            totalTokens: this.totalTokens
+          },
+          'Inverted index snapshot skipped: payload too large to serialize'
+        );
+        return;
+      }
+      throw error;
+    }
+    fs.writeFileSync(indexFilePath, serializedPayload);
 
     const indexFileStats = fs.statSync(indexFilePath);
     const endTime = performance.now();
